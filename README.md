@@ -1,6 +1,6 @@
 # Sigil: **A framework for auto-improving code**
 
-![image.png](attachment:1c57b5e2-1b4e-4046-b28e-482060789a03:image.png)
+![logo.png](attachment:1c57b5e2-1b4e-4046-b28e-482060789a03:logo.png)
 
 Sigil is a framework for guiding code auto improvement through LLM-guided code optimization. 
 
@@ -27,7 +27,7 @@ Sigil allows you to:
 
 ## Example flow
 
-```
+```python
 ## Write Specification
 
 # File mylib.py
