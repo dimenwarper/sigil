@@ -1,2 +1,2 @@
-# sigil
-Massively parallel agents to optimize anything
+# Sigil
+A collaborative framework for self-improving code
