@@ -1,5 +1,6 @@
-# Sigil: **A framework for auto-improving code**
 <img width="105" height="102" alt="logo" src="https://github.com/user-attachments/assets/c2a4fe9c-74a5-46c2-bb58-5a20439e6efb" />
+# Sigil: **A framework for auto-improving code**
+
 
 Sigil is a framework for guiding code auto improvement through LLM-guided code optimization. 
 
