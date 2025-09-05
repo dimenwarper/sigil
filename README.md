@@ -1,7 +1,12 @@
-<img width="105" height="102" alt="logo" src="https://github.com/user-attachments/assets/c2a4fe9c-74a5-46c2-bb58-5a20439e6efb" />
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://github.com/user-attachments/assets/c2a4fe9c-74a5-46c2-bb58-5a20439e6efb">
+    <img alt="sigil" src="https://github.com/dimenwarper/sigil/blob/400500a852b604cadb522dbc6ae5057d2daae908/logo.png" width=15%>
+  </picture>
+</p>
 
 # Sigil: **A framework for auto-improving code**
-
 
 Sigil is a framework for guiding code auto improvement through LLM-guided code optimization. 
 
