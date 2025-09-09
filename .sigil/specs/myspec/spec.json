@@ -1,0 +1,13 @@
+{
+  "name": "myspec",
+  "description": "Example optimization spec",
+  "created_at": "2025-09-08T22:58:06.185391",
+  "pins": [
+    {
+      "function_id": "sigil://__main__@082be382bc4836c3a05e24dd48d8ead4aa74bc25/__main__:myfun#ec721f4f6115c432",
+      "eval_function": "myeval",
+      "serve_workspace": "v1",
+      "created_at": "2025-09-08T22:58:06.196253"
+    }
+  ]
+}

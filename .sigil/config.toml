@@ -1,0 +1,7 @@
+workspace_dir = ".sigil"
+tracker_enabled = false
+resolver_mode = "off"
+llm_provider = "openai"
+llm_model = "gpt-4"
+max_iterations = 10
+sandbox_timeout = 30
