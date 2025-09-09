@@ -1,5 +1,3 @@
-# Sigil: **A framework for auto-improving code**
-
 ![image.png](attachment:1c57b5e2-1b4e-4046-b28e-482060789a03:image.png)
 
 Sigil is a framework for guiding code auto improvement through LLM-guided code optimization. 
@@ -9,14 +7,14 @@ Sigil allows you to:
 - Auto-improve your code
     - Specify parts of your code that you want to improve via python decorators
     - Tie these pieces of code to evaluation functions that will guide the improvement
-    - Automatically track code usage
+    - Automatically track code usage so evaluations are done in-distribution
     - Run LLM-guided self improvement using optimization techniques like alphaevolve
 - Keep and serve the solutions you want
     - Sigil book-keeps all solutions explored throughout the optimization
     - You can serve the solutions that makes sense and keep track of usage of each
 - Collaborate with others
     - Sigil enables others to contribute to your project by enabling them to launch optimization runs
-    - You can similarly contribute optimization runs for other projects
+    - You can similarly contribute optimization runs for other projects by doing codeopt runs on their behalf
 
 ## Main concepts
 
@@ -27,7 +25,7 @@ Sigil allows you to:
 
 ## Example flow
 
-```
+```python
 ## Write Specification
 
 # File mylib.py
@@ -100,47 +98,201 @@ v1        |  Solution uses X features    | myeval	      |   40 +/- 5
 - At first, we will support inspection of codopt runs and solutions through the CLI, but we will consider building a UI
 - We will support publishing sigil runs, maybe not just in github, but in another central repository to track usage stats/contributions
 
-## Implementation Status (as of 2025-09-05)
+# Semi-formal system specification
 
-**✅ Completed Core Framework:**
+## Overview
 
-- **Package Structure:** Full Python package managed with uv, including pyproject.toml with dependencies (click, pydantic, toml) and dev tools (pytest, black, isort, pyright, pre-commit)
-- **Core Components:** 
-  - `Spec` class for managing specifications/namespaces with workspace management
-  - `@improve` decorator for marking functions for optimization with evaluation tracking
-  - `FunctionTracker` for capturing function calls, inputs, outputs, and evaluation scores
-  - Global `track()` function for registering specs
-- **Workspace System (`Workspaces` class):**
-  - Solution storage with metadata in JSON format
-  - Code storage with organized directory structure (`.sigil/ws/spec/workspace/`)
-  - Unified diff generation between original and optimized code
-  - Best solution retrieval based on evaluation scores
-  - Workspace export functionality
-- **CLI Interface (`sigil` command):**
-  - `inspect-samples` - View collected function call samples and scores
-  - `inspect-solutions` - View optimized solutions (basic implementation)
-  - `run` - Execute optimization with specified algorithm and iterations
-- **Optimization Algorithms:**
-  - `LLMSampler` - Basic LLM-based code variation generator (placeholder implementation)
-  - Extensible optimizer framework with abstract base class
-- **Example Usage:** Complete working example in `examples/basic_usage.py` demonstrating all features
+Sigil defines a portable framework for the controlled generation, evaluation, and deployment of candidate code improvements (“codeopts”) via LLM-guided code generation. It has two goals:
 
-**🚧 Current Limitations:**
-- LLM integration is placeholder (no actual API calls yet)
-- Code execution and evaluation is simulated 
-- Solution serving from workspaces not fully integrated
-- Advanced algorithms (AlphaEvolve, SA, RL) not implemented yet
+First, it aims to ensure that all optimizations are **reproducible, auditable, and reversible**, ensuring that production deployments are always governed by signed manifests.
 
-**📁 Project Structure:**
+Second, it designed to be collaborative in nature: people across the world should be able to contribute code generations and solutions seamlessly. Allocations of such contributions would ideally jumpstart a “market of ideas” similar to open source repositories.
+
+The system is structured around these technical anchors:
+
+1. **Pins:** Pins are pieces of codes that are registered (”pinned”) to be improved (e.g. functions marked by an improved decorator)
+2. **Specs:** Specs are sets of pins that should be run and evaluated/improved in unison
+3. **Codeopt optimizers:** Code optimization generators, LLM-guided, like alphaevolve.
+4. **Codeopt Run:** a budgeted search procedure that proposes and evaluates candidate edits for a spec.
+5. **Workspace:** Workspaces are namespaces where codeopt runs can happen. Specifically, they are a content-addressed tree storing code diffs and candidate artifacts.
+6. **Sample Tracker:** an append-only event log of all candidate trials, evaluations, and metadata.
+7. **Manifest:** a signed, immutable record binding specific function identities to approved candidates with supporting evidence.
+8. **Resolver:**  the production component that deterministically maps function calls to implementations based on manifests.
+9. **Collaborator commons:** Sigil is designed as a shared optimization commons. Contributors can run codeopt searches, deposit candidates and evidence into a common workspace, and propose manifests that others may audit, reject, or promote.
+
+## Entity IDs
+
+### Function Identity
+
+Each improvable unit of code must have a **FunctionID**.
+
+A FunctionID is a stable, content-addressed identifier:
+
 ```
-sigil/
-├── pyproject.toml
-├── src/sigil/
-│   ├── __init__.py
-│   ├── core.py          # Spec, @improve, tracking
-│   ├── workspace.py     # Solution storage/management
-│   ├── optimizers.py    # Optimization algorithms
-│   └── cli.py           # Command-line interface
-└── examples/
-    └── basic_usage.py   # Working example
+sigil://<package>@<git-commit>/<module>:<qualname>#<abi-hash>
+
 ```
+
+Where:
+
+- `<package>@<git-commit>` identifies the repository and revision.
+- `<module>:<qualname>` is the fully qualified symbol.
+- `<abi-hash>` is a digest computed from the normalized abstract syntax tree (AST) of the function plus a minimal runtime environment (language version, dependency versions).
+
+### Candidate Identity
+
+Each candidate implementation has a **CandidateID**:
+
+```
+diff://b3:<digest>
+
+```
+
+Where `<digest>` is a content hash over the unified diff (text) and canonical AST patch (structural).
+
+## Pins and specs
+
+Pins are the atoms of code improvement: they mark what parts of the code will be subject to code auto-improvement/tracking/generation/evaluation. 
+
+Specs define the context of the code that is being optimized, under which lie a set of pins.
+
+### Properties
+
+In our initial python implementation, pins will be marked with the `@improve` decorator which will reference what spec they belong to
+
+## Workspaces
+
+A workspace is meant to represent a namespace where codeopt runs. Think of them conceptually as “branches” where people could try out some codeopt idea. Specifically, it is a versioned directory or object store containing:
+
+- Candidate diffs and AST patches.
+- Metadata (generator provenance, optimizer parameters).
+- Logs and artifacts of evaluations.
+
+### Properties
+
+- Immutable: once written, candidates are never modified.
+- Content-addressed: each candidate is identified by digest.
+- Portable: may be serialized into tarballs or object storage.
+
+## Codeopt Optimizers
+
+LLM-guided code generator methods tied to maximizing some evaluation function. For example, one could set up a genetic algorithm-like approach similar to iteratively improve the code. Alphafold falls into this category but you can visualize other black box methods as well like simulated annealing
+
+### Properties
+
+- Optimizers should likely general have a master configuration that depends on a system prompt and some parameters
+- A very simple implementation of one could simply be the LLM proposing a solution. In this case a Codeopt run is just a sampling of the LLM without real search guiding it
+
+## Codeopt Runs
+
+A codeopt run is a controlled search procedure over candidate implementations. It consists of:
+
+- A set of generators (LLM-based, heuristic, or rule-based).
+- An evaluator contract that tests correctness and performance.
+
+### Execution
+
+- All candidates are executed in a **sandboxed subprocess** with time, memory, and import limits.
+- Evaluations must be **paired with baseline** executions using identical seeds or input shards.
+- Evaluator outputs must include correctness (pass/fail or metrics), latency quantiles, error taxonomies, and resource usage.
+
+### Outcome
+
+The outcome of a run is a set of candidates with associated metrics stored in the workspace and logged in the tracker.
+
+## Sample Tracker
+
+We automagically track all samples that go into the function, but this has to be activated manually after a `sigil tracker start` and stop after a `sigil tracker stop`. The tracker is an append-only, columnar log of all evaluations. Each record must include:
+
+- `trace_id`, `timestamp`.
+- `function_id`, `candidate_id` (or baseline).
+- `resolver_mode` (off|dev|prod).
+- `allocation` (for staged experiments).
+- `metrics` (accuracy, latency quantiles, errors).
+- `resources` (wall time, CPU, memory).
+- `input/output summaries` (sketches, not raw unless permitted).
+- `environment` (runtime version, dependency versions).
+
+### Properties
+
+- Append-only.
+- Immutable once written.
+- Must support reproducible queries (used by manifests)
+- Easy to turn on or off via tracker start/stop
+
+## Manifests
+
+A manifest is an immutable, signed JSON or YAML document binding specific functions to candidate implementations under explicit policies and evidence.
+
+### Schema (abridged)
+
+```json
+{
+  "schema": "sigil/manifest@0",
+  "manifest_id": "manifest://b3:...",
+  "spec": "spec://b3:...",
+  "created_at": "2025-09-07T21:15:00Z",
+  "author": "example@domain",
+  "workspace": "ws://b3:...",
+  "codebase": { "repo": "...", "commit": "abc123" },
+  "evaluator_set": [{ "name": "accuracy", "version": "3" }],
+  "policy": {
+    "constraints": { "accuracy": { "op": ">=", "value": 0.999 } },
+    "non_inferiority": { "metric": "accuracy", "delta": -0.0002 }
+  },
+  "pins": [
+    {
+      "function_id": "sigil://pkg@abc123/mod:foo#abi-xyz",
+      "candidate": "diff://b3:1a2b...",
+      "metrics": { "accuracy": 1.0, "p99_ms": 0.91 },
+      "evidence": { "n_trials": 2000, "ci": { "accuracy": [0.9993, 0.9997] } }
+    }
+  ],
+  "signature": { "alg": "ed25519", "sig": "base64:..." }
+}
+
+```
+
+- **Signed**: manifests must be signed with a trusted key.
+- **Immutable**: new versions produce new manifest IDs.
+- **Atomic**: either fully applies or falls back to baseline.
+
+## Resolver
+
+The resolver is the runtime component that maps FunctionIDs to implementations.
+
+### Behavior
+
+- Loads exactly one manifest at startup.
+- Verifies signature, ABI compatibility, and policy constraints.
+- In **prod** mode: applies only manifest-approved pins according to their policy; falls back to baseline if anything is invalid.
+- In **dev** mode: may allow hot-swaps and local overrides (must be logged).
+- In **off** mode: always runs baselines.
+
+## Lifecycle
+
+1. **Mark** functions for improvement (`Spec` and `@improve`).
+2. **Gather** samples (`sigil tracker start`  to start tracking samples and `sigil tracker stop` ) to stop
+3. **Run** a codeopt search (`sigil run`), generating candidates and logs.
+4. **Compare** candidates to baseline (`sigil compare`) with paired trials.
+5. **Promote** a candidate by writing a signed manifest (`sigil promote`).
+6. **Resolve** functions in production using the manifest (this is done at runtime, we can make this efficient by pre-applying the patches)
+7. **Publish** (`sigil publish`) applies the manifest to the code itself by rewriting the pins to their most optimal code according to their policies. This can then be committed and submitted as a PR for review
+
+## Security Considerations
+
+- All candidate evaluations must be sandboxed.
+- Production must never run code outside of signed manifests.
+- Partial manifest application is prohibited in production.
+- Tracker must redact sensitive data and support privacy-aware summaries.
+
+## Extensions
+
+Future versions may add:
+
+- **Staging allocations** (traffic splits encoded in manifests).
+- **Multi-objective Pareto pins**.
+- **Nested manifests** for large projects.
+- **Reproducer blocks** with container images and exact run commands.
+
+This specification defines the minimal contract required for a Sigil-conforming system.
