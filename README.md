@@ -108,3 +108,16 @@ v1        |  Solution uses X features    | myeval	      |   40 +/- 5
 - We will support publishing sigil runs, maybe not just in github, but in another central repository to track usage stats/contributions
 
 
+## Pyodide Sandbox (optional)
+
+Sigil includes a Pyodide-based sandbox runner for evaluating candidates in Python-in-WASM. To set it up:
+
+- Prerequisites: Node.js installed (`node`, `npm` on PATH)
+- Install the Pyodide npm package into a local Node project:
+
+```
+uv run sigil sandbox setup-pyodide
+```
+
+This creates a Node project at `.sigil/pyodide_node` and installs `pyodide`. The Pyodide sandbox will use this project to resolve the `pyodide` module. For offline usage, set `PYODIDE_INDEX_URL` to a local Pyodide distribution directory; otherwise it will fetch assets from the CDN by default.
+

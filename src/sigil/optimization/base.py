@@ -7,6 +7,7 @@ from typing import List, Dict, Any, Optional, Callable
 from dataclasses import dataclass
 
 from ..core.models import Candidate, Pin, EvaluationResult
+from ..llm import get_llm_client
 from ..workspace.workspace import Workspace
 
 
@@ -79,23 +80,12 @@ Please provide an improved version of this function."""
         return base_prompt.format(original_code=pin.original_source)
     
     def _call_llm(self, prompt: str, system_prompt: str = "") -> str:
+        """Call the configured LLM (via pydantic_ai if available).
+
+        Falls back to a deterministic mock if dependencies or keys are missing.
         """
-        Call the LLM to generate code.
-        
-        This is a placeholder - in a real implementation, you'd integrate
-        with OpenAI, Anthropic, or other LLM providers.
-        """
-        # Placeholder implementation
-        import random
-        
-        # Simple mock responses for demonstration
-        mock_improvements = [
-            "# Improved with better error handling\ndef improved_function():\n    try:\n        return original_logic()\n    except Exception as e:\n        logging.error(f'Error: {e}')\n        return None",
-            "# Optimized version\ndef improved_function():\n    # More efficient implementation\n    return optimized_logic()",
-            "# Enhanced with type hints\ndef improved_function(x: int) -> int:\n    # Better typed version\n    return enhanced_logic(x)"
-        ]
-        
-        return random.choice(mock_improvements)
+        client = get_llm_client()
+        return client.generate(prompt, system_prompt=system_prompt, temperature=self.config.temperature)
     
     def _extract_function_from_response(self, response: str, function_name: str) -> str:
         """Extract the function code from LLM response."""

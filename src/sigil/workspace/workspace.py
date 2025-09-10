@@ -10,9 +10,11 @@ from pathlib import Path
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 
+import time
 from ..core.models import Candidate, EvaluationResult, Pin
 from ..core.ids import FunctionID, CandidateID
 from ..core.config import get_config
+from ..sandbox import get_sandbox, SandboxLimits
 
 
 class Workspace:
@@ -217,6 +219,105 @@ class Workspace:
         
         with tarfile.open(target_path, "w:gz") as tar:
             tar.add(self.workspace_dir, arcname=f"workspace_{self.name}")
+
+    # --- Evaluation helpers ---
+    def evaluate_candidate(
+        self,
+        *,
+        pin_function_id: FunctionID,
+        candidate: Candidate,
+        evaluator=None,
+        call_args=None,
+        call_kwargs=None,
+    ) -> EvaluationResult:
+        """Evaluate a single candidate by executing its function in a sandbox.
+
+        Args:
+            pin_function_id: The FunctionID of the target function.
+            candidate: The candidate to run.
+            evaluator: Optional callable that maps result -> score (float).
+            call_args: Positional args list used to invoke the function.
+            call_kwargs: Keyword args dict used to invoke the function.
+
+        Returns:
+            EvaluationResult persisted to the workspace.
+        """
+        config = get_config()
+        # Prepare sandbox
+        sandbox = get_sandbox(getattr(config, "sandbox_strategy", "subprocess"))
+        limits = SandboxLimits(
+            cpu_seconds=getattr(config, "sandbox_cpu_seconds", 1),
+            wall_seconds=getattr(config, "sandbox_wall_seconds", 2),
+            memory_mb=getattr(config, "sandbox_memory_mb", 512),
+            disable_network=getattr(config, "sandbox_disable_network", True),
+        )
+
+        func_name = pin_function_id.qualname.split(".")[-1]
+        call_args = call_args or []
+        call_kwargs = call_kwargs or {}
+
+        t0 = time.time()
+        res = sandbox.run_function(
+            code=candidate.source_code,
+            func_name=func_name,
+            args=call_args,
+            kwargs=call_kwargs,
+            limits=limits,
+        )
+        duration = time.time() - t0
+
+        metrics = {"success": 1.0 if res.ok else 0.0}
+        passed = bool(res.ok)
+        error_message = res.error
+
+        if res.ok and evaluator:
+            try:
+                score = float(evaluator(res.result))
+                metrics["score"] = score
+            except Exception:
+                # Evaluator failure shouldn't crash evaluation recording
+                metrics["score"] = float("nan")
+
+        evaluation = EvaluationResult(
+            candidate_id=candidate.candidate_id,
+            function_id=pin_function_id,
+            metrics=metrics,
+            passed=passed,
+            error_message=error_message,
+            execution_time=duration,
+        )
+        self.store_evaluation(evaluation)
+        return evaluation
+
+    def evaluate_candidates_for_pin(
+        self,
+        *,
+        pin: Pin,
+        candidates: list[Candidate],
+        evaluator=None,
+        call_cases: Optional[list[dict]] = None,
+    ) -> list[EvaluationResult]:
+        """Evaluate multiple candidates for a pin.
+
+        call_cases: list of {"args": [...], "kwargs": {...}}; if None, runs once
+        with no args/kwargs.
+        """
+        results: list[EvaluationResult] = []
+        cases = call_cases or [{}]
+        for cand in candidates:
+            # Evaluate per case and keep the last (or best later)
+            last_eval: EvaluationResult | None = None
+            for case in cases:
+                last_eval = self.evaluate_candidate(
+                    pin_function_id=pin.function_id,
+                    candidate=cand,
+                    evaluator=evaluator,
+                    call_args=case.get("args") if isinstance(case, dict) else None,
+                    call_kwargs=case.get("kwargs") if isinstance(case, dict) else None,
+                )
+            if last_eval:
+                results.append(last_eval)
+        return results
     
     @classmethod
     def import_workspace(cls, archive_path: Path, workspace_dir: Optional[Path] = None) -> "Workspace":

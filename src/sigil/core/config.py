@@ -59,8 +59,10 @@ def save_config(config: SigilConfig, config_path: Optional[Path] = None):
     
     # Convert to dict and save
     config_dict = config.model_dump()
-    # Convert Path objects to strings for TOML serialization
+    # Convert known Path objects to strings for TOML serialization
     config_dict["workspace_dir"] = str(config_dict["workspace_dir"])
+    if config_dict.get("pyodide_node_dir") is not None:
+        config_dict["pyodide_node_dir"] = str(config_dict["pyodide_node_dir"])
     # Convert enum to string
     config_dict["resolver_mode"] = config_dict["resolver_mode"].value
     

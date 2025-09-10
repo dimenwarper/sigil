@@ -26,3 +26,9 @@ dev = [
     "pytest>=8.4.2",
     "pytest-cov>=6.2.1",
 ]
+
+# Optional group for real LLM integration
+llm = [
+    "pydantic-ai>=0.0.17",  # version may vary; adjust as needed
+    "openai>=1.40.0",
+]

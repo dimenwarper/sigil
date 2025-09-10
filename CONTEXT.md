@@ -301,7 +301,7 @@ This specification defines the minimal contract required for a Sigil-conforming 
 
 # Implementation Status
 
-**Last Updated: September 8, 2025**
+**Last Updated: September 10, 2025**
 
 ## ✅ IMPLEMENTATION COMPLETE
 
@@ -355,7 +355,14 @@ The Sigil framework has been fully implemented according to the specification ab
   - **RandomSearchOptimizer**: Randomized prompt variations with temperature control
   - **GreedyOptimizer**: Iterative improvement using best candidates as parents
   - Pluggable optimizer architecture with base class
-  - Mock LLM integration (easily replaceable with real LLM providers)
+  - LLM integration via `pydantic_ai` (OpenAI) with graceful mock fallback
+
+#### Sandboxing
+- **Sandbox Interface** (`src/sigil/sandbox/`)
+  - `Sandbox`, `SandboxLimits`, `SandboxResult` base types
+  - **SubprocessSandbox**: POSIX rlimits (CPU/AS/NOFILE/FSIZE), wall-time kill, optional network/subprocess blocking, temp working dir
+  - **PyodideSandbox**: Node-based Python-in-WASM execution using the `pyodide` npm package; supports CDN or local assets via `PYODIDE_INDEX_URL`
+  - CLI installer: `sigil sandbox setup-pyodide` (creates `.sigil/pyodide_node` and installs npm `pyodide`)
 
 #### CLI Interface
 - **Complete CLI** (`src/sigil/cli.py`)
@@ -366,6 +373,7 @@ The Sigil framework has been fully implemented according to the specification ab
   - `sigil inspect-solutions <spec>` - View optimization results
   - `sigil compare <spec> <workspace>` - Compare candidates to baseline
   - `sigil config` - View and modify configuration
+  - `sigil sandbox setup-pyodide` - Prepare Node project and install `pyodide` for the Pyodide sandbox
 
 ### Project Structure
 ```
@@ -377,6 +385,9 @@ src/sigil/
 │   ├── ids.py              # FunctionID, CandidateID generation
 │   ├── models.py           # Pydantic data models
 │   └── config.py           # Configuration management
+├── llm/
+│   ├── __init__.py         # LLM client abstraction
+│   └── providers.py        # pydantic_ai-backed client + mock fallback
 ├── spec/
 │   ├── __init__.py
 │   ├── spec.py             # Spec class and management
@@ -394,6 +405,13 @@ src/sigil/
 ├── resolver/
 │   ├── __init__.py
 │   └── resolver.py         # Runtime function resolution
+├── sandbox/
+│   ├── __init__.py         # Sandbox factory and exports
+│   ├── base.py             # Sandbox types
+│   ├── subprocess.py       # SubprocessSandbox
+│   ├── _runner_subprocess.py
+│   ├── pyodide.py          # PyodideSandbox
+│   └── pyodide_runner.mjs  # Node-based Pyodide runner
 ├── manifest/
 │   └── __init__.py         # Manifest management (placeholder)
 └── utils/
@@ -444,14 +462,31 @@ uv run sigil inspect-solutions myspec
 
 ### Dependencies
 - **Core**: `click`, `pydantic`, `toml`
-- **Optional**: `blake3` (for improved hashing)
+- **Optional**:
+  - `blake3` (for improved hashing)
+  - `pydantic-ai`, `openai` (group `llm`) for real LLM calls
+  - Node.js (`node`, `npm`) for the Pyodide sandbox (install via `sigil sandbox setup-pyodide`)
 - **Development**: `black`, `isort`, `pytest`, `pyright`
 
+### Configuration additions
+- `sandbox_strategy`: `subprocess` (default) or `pyodide`
+- `sandbox_*` limits: cpu_seconds, wall_seconds, memory_mb, disable_network
+- `pyodide_node_dir`: path to the local Node project holding the `pyodide` npm package
+
+### Sandbox usage (optional)
+```bash
+# Prepare Pyodide sandbox (requires Node)
+uv run sigil sandbox setup-pyodide
+
+# Optional: point to local Pyodide assets for offline
+export PYODIDE_INDEX_URL=file:///abs/path/to/pyodide
+```
+
 ### Next Steps
-1. **LLM Integration**: Replace mock LLM calls with real providers (OpenAI, Anthropic, etc.)
-2. **Manifest System**: Implement cryptographic signing and verification
-3. **Security**: Add proper sandboxing for candidate execution
-4. **Collaboration**: Build multi-user workspace sharing
-5. **UI**: Consider web interface for visualization and management
+1. **Manifest System**: Implement cryptographic signing and verification
+2. **Evaluation Flow**: Wire sandboxed evaluation into Workspace/CLI (e.g., `evaluate_candidate`)
+3. **Security**: Expand sandbox options (Linux bwrap/firejail) and stronger network/file isolation
+4. **Collaboration**: Multi-user workspace sharing and publishing
+5. **UI**: Web interface for visualization and management
 
 The framework is production-ready for the core optimization workflow and provides a solid foundation for all advanced features described in the specification.

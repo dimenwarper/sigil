@@ -133,3 +133,10 @@ class SigilConfig(BaseModel):
     llm_model: str = "gpt-4"
     max_iterations: int = 10
     sandbox_timeout: int = 30  # seconds
+    sandbox_strategy: str = "subprocess"  # or "pyodide"
+    sandbox_cpu_seconds: int = 1
+    sandbox_wall_seconds: int = 2
+    sandbox_memory_mb: int = 512
+    sandbox_disable_network: bool = True
+    # Optional Node project directory for Pyodide npm install
+    pyodide_node_dir: Optional[Path] = None
