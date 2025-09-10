@@ -7,16 +7,16 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from .core.config import get_config, save_config
+from .core.config import get_config, save_config as save_core_config
 from .core.models import SigilConfig, ResolverMode
 from .optimization.base import OptimizationConfig
 from .spec.spec import Spec, track, get_active_spec, list_active_specs
 from .tracking.tracker import start_tracking, stop_tracking, is_tracking, get_tracker
 from .workspace.workspace import Workspace
-from .optimization.simple import SimpleOptimizer, RandomSearchOptimizer, GreedyOptimizer
+from .optimization.registry import get_optimizer_class, list_optimizers
 from .resolver.resolver import get_resolver
 from .sandbox import get_sandbox
-from .core.config import save_config
+ 
 
 
 @click.group()
@@ -44,7 +44,7 @@ def init(workspace_dir: Optional[str], llm_provider: str, llm_model: str):
     config.workspace_dir.mkdir(parents=True, exist_ok=True)
     
     # Save configuration
-    save_config(config)
+    save_core_config(config)
     
     click.echo(f"Initialized Sigil workspace at {config.workspace_dir}")
 
@@ -140,7 +140,7 @@ def setup_pyodide(node_dir: Optional[str], version: str):
 
     # Save location in config
     config.pyodide_node_dir = target_dir
-    save_config(config)
+    save_core_config(config)
 
     click.echo("Pyodide npm package installed.")
     click.echo(f"Node project: {target_dir}")
@@ -235,12 +235,16 @@ def inspect_solutions(spec_name: str):
 @cli.command()
 @click.argument("spec_name")
 @click.option("--name", default="default", help="Workspace name")
-@click.option("--optimizer", default="simple", help="Optimizer to use")
-@click.option("--niter", default=10, help="Number of iterations")
+@click.option("--optimizer", default=None, help="Optimizer to use (overrides config file)")
+@click.option("--niter", default=None, type=int, help="Number of iterations (optimizer-specific)")
 @click.option("--max-candidates", default=20, help="Maximum candidates")
+@click.option("--system-prompt", default=None, help="System prompt for LLM-guided optimizers")
+@click.option("--samples", default=None, type=int, help="Number of samples (for simple optimizer)")
 @click.option("--evaluate/--no-evaluate", default=False, help="Evaluate candidates in sandbox")
 @click.option("--eval-cases", default=None, help="JSON array of call cases: [{\"args\":[],\"kwargs\":{}}]")
-def run(spec_name: str, name: str, optimizer: str, niter: int, max_candidates: int, evaluate: bool, eval_cases: Optional[str]):
+@click.option("--from-config", "from_config", type=click.Path(exists=True), default=None, help="Path to optimizer config TOML to load")
+@click.option("--save-config", "save_config_path", type=click.Path(), default=None, help="Path to save effective optimizer config TOML")
+def run(spec_name: str, name: str, optimizer: Optional[str], niter: Optional[int], max_candidates: int, system_prompt: Optional[str], samples: Optional[int], evaluate: bool, eval_cases: Optional[str], from_config: Optional[str], save_config_path: Optional[str]):
     """Run code optimization for a spec."""
     # Load the spec
     try:
@@ -256,26 +260,56 @@ def run(spec_name: str, name: str, optimizer: str, niter: int, max_candidates: i
     # Create workspace
     workspace = Workspace(name, spec_name)
     
-    # Configure optimizer
-    config = OptimizationConfig(
-        max_iterations=niter,
-        max_candidates=max_candidates
-    )
-    
-    # Select optimizer
-    optimizer_classes = {
-        "simple": SimpleOptimizer,
-        "random": RandomSearchOptimizer, 
-        "greedy": GreedyOptimizer
-    }
-    
-    if optimizer not in optimizer_classes:
-        click.echo(f"Unknown optimizer '{optimizer}'. Available: {list(optimizer_classes.keys())}")
+    # Load optimizer and config
+    selected_optimizer = optimizer
+    loaded_optimizer_name = None
+    loaded_config = None
+    if from_config:
+        try:
+            import toml as _toml
+            _obj = _toml.load(from_config)
+            loaded_optimizer_name = _obj.get("optimizer")
+            from .optimization.base import BaseOptimizer as _BO
+            # Resolve class to use: CLI --optimizer overrides file if provided
+            selected_optimizer = selected_optimizer or loaded_optimizer_name
+            # Build a temporary class selection to load config via its classmethod if needed
+            if selected_optimizer:
+                opt_cls_tmp = get_optimizer_class(selected_optimizer)
+            else:
+                opt_cls_tmp = None
+            # Load config data
+            cfg_data = _obj.get("config", {})
+            loaded_config = OptimizationConfig(**cfg_data)
+        except Exception as e:
+            click.echo(f"Failed to load optimizer config: {e}")
+            return
+
+    # Determine optimizer class
+    if not selected_optimizer:
+        selected_optimizer = "simple"
+    opt_cls = get_optimizer_class(selected_optimizer)
+    if not opt_cls:
+        click.echo(f"Unknown optimizer '{selected_optimizer}'. Available: {list(list_optimizers().keys())}")
         return
+
+    # Merge configuration: file -> CLI overrides
+    base_cfg = loaded_config or OptimizationConfig()
+    if niter is not None:
+        base_cfg.max_iterations = niter
+    base_cfg.max_candidates = max_candidates if max_candidates is not None else base_cfg.max_candidates
+    if system_prompt is not None:
+        base_cfg.system_prompt = system_prompt
+    if samples is not None:
+        base_cfg.n_samples = int(samples)
+
+    opt = opt_cls(base_cfg)
+    if save_config_path:
+        try:
+            opt.save_config(Path(save_config_path))
+        except Exception as e:
+            click.echo(f"Warning: failed to save optimizer config: {e}")
     
-    opt = optimizer_classes[optimizer](config)
-    
-    click.echo(f"Starting optimization run for spec '{spec_name}' using {optimizer} optimizer")
+    click.echo(f"Starting optimization run for spec '{spec_name}' using {selected_optimizer} optimizer")
     click.echo(f"Workspace: {name}")
     click.echo(f"Max iterations: {niter}")
     click.echo(f"Max candidates: {max_candidates}")
@@ -383,7 +417,7 @@ def config(mode: Optional[str]):
     
     if mode:
         config.resolver_mode = ResolverMode(mode)
-        save_config(config)
+        save_core_config(config)
         click.echo(f"Resolver mode set to: {mode}")
     else:
         # Show current configuration

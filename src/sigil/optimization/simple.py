@@ -14,76 +14,64 @@ from ..workspace.workspace import Workspace
 
 
 class SimpleOptimizer(BaseOptimizer):
+    """Samples N candidates from an LLM using a system prompt.
+
+    Config fields used:
+    - system_prompt: passed to the LLM as the system instruction
+    - n_samples: number of candidates to sample
+    - max_candidates: hard cap on stored candidates
     """
-    Simple optimizer that uses direct LLM prompting.
-    
-    Generates a small number of candidates by prompting the LLM
-    with different optimization objectives.
-    """
-    
+
     def optimize(
         self,
         pin: Pin,
         workspace: Workspace,
-        evaluator: Optional[Callable] = None
+        evaluator: Optional[Callable] = None,
     ) -> List[Candidate]:
-        """Generate candidates using simple LLM prompting."""
-        candidates = []
-        
-        optimization_prompts = [
-            "Improve this function for better performance:",
-            "Refactor this function for better readability:",
-            "Add better error handling to this function:",
-            "Optimize this function for memory efficiency:",
-            "Make this function more robust and maintainable:"
-        ]
-        
-        for i, prompt_prefix in enumerate(optimization_prompts[:self.config.max_iterations]):
+        candidates: List[Candidate] = []
+
+        # Build the user prompt from the function source
+        user_prompt = (
+            "You will be provided a Python function. Return an improved version, "
+            "keeping the same name and signature. Only output valid Python code "
+            "for the function definition.\n\n" + f"```python\n{pin.original_source}\n```"
+        )
+
+        n = max(1, int(getattr(self.config, "n_samples", 1)))
+        for i in range(n):
             if len(candidates) >= self.config.max_candidates:
                 break
-            
             try:
-                # Construct the prompt
-                system_prompt = self._get_system_prompt(pin)
-                user_prompt = f"{prompt_prefix}\n\n```python\n{pin.original_source}\n```"
-                
-                # Call LLM
-                response = self._call_llm(user_prompt, system_prompt)
-                
-                # Extract function from response
-                function_name = pin.function_id.qualname.split('.')[-1]
-                candidate_source = response  # For now, just use the full response
-                
+                response = self._call_llm(user_prompt, self.config.system_prompt or self._get_system_prompt(pin))
+
+                # For now, use the full response as candidate source; could extract function
+                candidate_source = response
                 if not candidate_source or not self._validate_candidate(pin.original_source, candidate_source):
                     continue
-                
-                # Create candidate
+
                 candidate_id = CandidateID.from_source(pin.original_source, candidate_source)
-                
+                # Avoid duplicates
+                if any(c.candidate_id == candidate_id for c in candidates):
+                    continue
+
                 candidate = Candidate(
                     candidate_id=candidate_id,
                     function_id=pin.function_id,
                     source_code=candidate_source,
-                    diff_text="",  # Would compute actual diff
+                    diff_text="",
                     generator=self.name,
                     metadata={
-                        "iteration": i,
-                        "prompt": prompt_prefix,
-                        "optimization_objective": prompt_prefix.split()[1] if len(prompt_prefix.split()) > 1 else "general"
-                    }
+                        "sample_index": i,
+                        "system_prompt": bool(self.config.system_prompt),
+                    },
                 )
-                
-                # Store in workspace
                 workspace.store_candidate(candidate)
                 candidates.append(candidate)
-                
-                # Brief delay to avoid rate limiting
-                time.sleep(0.1)
-                
+                time.sleep(0.05)
             except Exception as e:
                 print(f"Error generating candidate {i}: {e}")
                 continue
-        
+
         return candidates
 
 

@@ -4,7 +4,8 @@ Base optimizer class for Sigil.
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Optional, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+from pathlib import Path
 
 from ..core.models import Candidate, Pin, EvaluationResult
 from ..llm import get_llm_client
@@ -21,6 +22,7 @@ class OptimizationConfig:
     llm_model: str = "gpt-4"
     temperature: float = 0.7
     system_prompt: str = ""
+    n_samples: int = 1
     additional_params: Dict[str, Any] = None
     
     def __post_init__(self):
@@ -39,6 +41,40 @@ class BaseOptimizer(ABC):
     def __init__(self, config: OptimizationConfig):
         self.config = config
         self.name = self.__class__.__name__.lower().replace("optimizer", "")
+
+    # ---- Config persistence (can be overridden by children) ----
+    def to_config_dict(self) -> Dict[str, Any]:
+        """Serialize optimizer configuration to a dict.
+
+        Children can override to include extra fields; default uses dataclass.
+        """
+        data = asdict(self.config)
+        return data
+
+    def save_config(self, path: Path | str):
+        """Save optimizer name and config to TOML (default)."""
+        import toml  # local dep
+
+        p = Path(path)
+        obj = {
+            "optimizer": self.name,
+            "config": self.to_config_dict(),
+        }
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("w") as f:
+            toml.dump(obj, f)
+
+    @classmethod
+    def load_config(cls, path: Path | str) -> OptimizationConfig:
+        """Load optimizer config from TOML and return OptimizationConfig.
+
+        Children can override to handle custom fields.
+        """
+        import toml  # local dep
+
+        data = toml.load(Path(path))
+        cfg = data.get("config", {})
+        return OptimizationConfig(**cfg)
     
     @abstractmethod
     def optimize(

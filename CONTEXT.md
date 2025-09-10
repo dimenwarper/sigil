@@ -192,7 +192,7 @@ A codeopt run is a controlled search procedure over candidate implementations. I
 
 ### Execution
 
-- All candidates are executed in a **sandboxed subprocess** with time, memory, and import limits.
+- All candidates are executed in a sandbox with time, memory, and import limits (current strategies: subprocess with POSIX rlimits, or Pyodide WASM).
 - Evaluations must be **paired with baseline** executions using identical seeds or input shards.
 - Evaluator outputs must include correctness (pass/fail or metrics), latency quantiles, error taxonomies, and resource usage.
 
@@ -342,6 +342,7 @@ The Sigil framework has been fully implemented according to the specification ab
   - Immutable candidate and evaluation persistence
   - Best candidate selection and comparison
   - Workspace import/export capabilities
+  - Sandboxed evaluation helpers: `evaluate_candidate(...)`, `evaluate_candidates_for_pin(...)`
 
 - **Resolver System** (`src/sigil/resolver/`)
   - Runtime function mapping (off/dev/prod modes)
@@ -351,11 +352,13 @@ The Sigil framework has been fully implemented according to the specification ab
 
 #### Optimization Engine
 - **Simple Optimizers** (`src/sigil/optimization/`)
-  - **SimpleOptimizer**: Direct LLM prompting with different objectives
+  - **SimpleOptimizer**: Samples N candidates from an LLM using a provided system prompt (`n_samples`, `system_prompt`)
   - **RandomSearchOptimizer**: Randomized prompt variations with temperature control
   - **GreedyOptimizer**: Iterative improvement using best candidates as parents
   - Pluggable optimizer architecture with base class
   - LLM integration via `pydantic_ai` (OpenAI) with graceful mock fallback
+  - Optimizer registry: `src/sigil/optimization/registry.py` maps CLI names to classes
+  - Optimizer config load/save: `BaseOptimizer.save_config(path)` and `BaseOptimizer.load_config(path)` (TOML)
 
 #### Sandboxing
 - **Sandbox Interface** (`src/sigil/sandbox/`)
@@ -368,7 +371,7 @@ The Sigil framework has been fully implemented according to the specification ab
 - **Complete CLI** (`src/sigil/cli.py`)
   - `sigil init` - Initialize workspace and configuration
   - `sigil tracker start/stop/status` - Control sample tracking
-  - `sigil run <spec> --optimizer <type> --niter <n>` - Execute optimization runs
+  - `sigil run <spec> --optimizer <type> [--from-config file] [--save-config file] --niter <n> --samples <k> --system-prompt ... [--evaluate --eval-cases JSON]` - Execute optimization runs; optionally load/save optimizer config and evaluate in sandbox
   - `sigil inspect-samples <spec>` - View collected samples
   - `sigil inspect-solutions <spec>` - View optimization results
   - `sigil compare <spec> <workspace>` - Compare candidates to baseline
@@ -453,8 +456,12 @@ uv run sigil init
 # Run example to create spec and pin
 uv run python examples/basic_example.py
 
-# Execute optimization
-uv run sigil run myspec --name v1 --optimizer simple --niter 5
+# Execute optimization (generation only)
+uv run sigil run myspec --name v1 --optimizer simple --samples 5 --system-prompt "Improve for readability and performance"
+
+# Execute optimization and evaluate candidates in sandbox
+uv run sigil run myspec --name v1 --optimizer simple --niter 5 \
+  --evaluate --eval-cases '[{"args":[1]},{"args":[2],"kwargs":{}}]'
 
 # View results  
 uv run sigil inspect-solutions myspec
@@ -484,9 +491,8 @@ export PYODIDE_INDEX_URL=file:///abs/path/to/pyodide
 
 ### Next Steps
 1. **Manifest System**: Implement cryptographic signing and verification
-2. **Evaluation Flow**: Wire sandboxed evaluation into Workspace/CLI (e.g., `evaluate_candidate`)
-3. **Security**: Expand sandbox options (Linux bwrap/firejail) and stronger network/file isolation
-4. **Collaboration**: Multi-user workspace sharing and publishing
-5. **UI**: Web interface for visualization and management
+2. **Security**: Expand sandbox options (Linux bwrap/firejail) and stronger network/file isolation
+3. **Collaboration**: Multi-user workspace sharing and publishing
+4. **UI**: Web interface for visualization and management
 
 The framework is production-ready for the core optimization workflow and provides a solid foundation for all advanced features described in the specification.
