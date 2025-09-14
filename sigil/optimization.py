@@ -35,7 +35,7 @@ def get_provider(kind: str) -> LLMProvider:
 
 
 class BaseOptimizer:
-    def propose(self, spec: Spec, provider: LLMProvider, num: int = 1) -> List[PatchResponse]:  # pragma: no cover - interface
+    def propose(self, spec: Spec, provider: LLMProvider, num: int = 1) -> List[PatchResponse]:
         raise NotImplementedError
 
 

@@ -24,7 +24,7 @@ class PatchResponse(BaseModel):
 
 
 class LLMProvider:
-    def propose(self, req: PatchRequest) -> PatchResponse:  # pragma: no cover - interface
+    def propose(self, req: PatchRequest) -> PatchResponse:
         raise NotImplementedError
 
 
@@ -86,7 +86,7 @@ class OpenAICompatibleProvider(LLMProvider):
                 # remove first and last fence
                 text = "\n".join(text.splitlines()[1:-1])
             obj = json.loads(text)
-        except Exception as e:  # pragma: no cover - network parsing
+        except Exception as e:
             raise RuntimeError(f"LLM returned non-JSON: {content[:200]}...") from e
         return PatchResponse.model_validate(obj)
 

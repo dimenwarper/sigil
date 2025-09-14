@@ -22,7 +22,7 @@ class EvalResult:
 
 
 class Backend:
-    def evaluate(self, eval_def: EvalDef, repo_root: Path, candidates: Iterable[Candidate]) -> List[EvalResult]:  # pragma: no cover - interface
+    def evaluate(self, eval_def: EvalDef, repo_root: Path, candidates: Iterable[Candidate]) -> List[EvalResult]:
         raise NotImplementedError
 
 
@@ -53,7 +53,7 @@ class RayBackend(Backend):
     def __init__(self):
         try:
             import ray  # type: ignore
-        except Exception as e:  # pragma: no cover - import path
+        except Exception as e: 
             raise RuntimeError("Ray is not installed. Install with: pip install 'ray'") from e
         self._ray = ray
         if not ray.is_initialized():  # local, in-process cluster
@@ -92,7 +92,7 @@ class RayBackend(Backend):
         tasks = [self._remote.remote(eval_def, str(repo_root), it) for it in items]
         try:
             results = list(ray.get(tasks))
-        except Exception as e:  # pragma: no cover - propagate ray errors with context
+        except Exception as e:
             raise RuntimeError(f"Ray evaluation failed: {e}") from e
         return results
 
