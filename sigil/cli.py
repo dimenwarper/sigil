@@ -9,8 +9,14 @@ from . import __version__
 from .config import load_global_config
 from .evals import EvalDef, load_eval, run_eval_commands, scaffold_eval
 from .spec import load_spec, scaffold_spec
-from .patches import validate_patch_against_pins, store_candidate, canonicalize_diff
+from .patches import (
+    validate_patch_against_pins,
+    store_candidate,
+    canonicalize_diff,
+    make_patched_worktree,
+)
 from .workspace import ws_path, runs_path
+from .optimizer_simple import get_provider, propose_once
 from .workspace import (
     baseline_dir,
     capture_env_lock,
@@ -75,6 +81,46 @@ def _baseline_only_run(repo_root: Path, spec_name: str, workspace: str, optimize
     return 0
 
 
+def _simple_llm_run(repo_root: Path, spec_name: str, workspace: str, optimizer: str, eval_name: str, provider_kind: str) -> int:
+    # Baseline first
+    rd = run_dir(repo_root, spec_name, workspace, run_id(optimizer))
+    bd = baseline_dir(rd)
+    bd.mkdir(parents=True, exist_ok=True)
+    (bd / "patch.diff").write_text("")
+    eval_def = load_eval(repo_root, eval_name)
+    timeout = (eval_def.budgets or {}).get("candidate_timeout_s")
+    base_results = run_eval_commands(eval_def, repo_root=repo_root, workdir=bd, timeout_s=timeout)
+    write_json(bd / "metrics.json", base_results)
+    write_json(bd / "env.lock", capture_env_lock(repo_root))
+
+    # Propose one candidate via LLM (or stub)
+    spec = load_spec(repo_root, spec_name)
+    provider = get_provider(provider_kind)
+    resp = propose_once(spec, provider)
+    patch_text = resp.patch
+    ok, msg = validate_patch_against_pins(patch_text, spec, parent_root=repo_root)
+    if not ok:
+        raise SystemExit(f"Proposed patch invalid: {msg}")
+
+    # Store candidate and evaluate in patched worktree
+    write_json(rd / "run.json", {"optimizer": optimizer, "backend": "local", "spec": spec_name, "workspace": workspace, "eval": eval_name})
+    digest, cdir = store_candidate(rd, patch_text, parent_id="BASELINE")
+    worktree = make_patched_worktree(repo_root, patch_text)
+    cand_results = run_eval_commands(eval_def, repo_root=worktree, workdir=cdir, timeout_s=timeout)
+    write_json(cdir / "metrics.json", cand_results)
+    (cdir / "logs.txt").write_text("candidate evaluated")
+    index: Dict[str, Any] = {
+        "nodes": [
+            {"id": "BASELINE", "parent": None, "status": "evaluated", "metrics": base_results.get("metrics", {})},
+            {"id": digest, "parent": "BASELINE", "status": "evaluated", "metrics": cand_results.get("metrics", {})},
+        ],
+        "pareto_front": [digest],
+    }
+    write_json(rd / "index.json", index)
+    print(f"Simple LLM run completed at {rd}; candidate {digest}")
+    return 0
+
+
 def cmd_run(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
     # Load spec for validation
@@ -82,7 +128,12 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not spec.evals:
         raise SystemExit("Spec has no evals linked. Use generate-eval or add one.")
     eval_name = args.eval or spec.evals[0]
-    return _baseline_only_run(repo_root, spec_name=spec.name, workspace=args.workspace, optimizer=args.optimizer, eval_name=eval_name)
+    if args.mode == "baseline":
+        return _baseline_only_run(repo_root, spec_name=spec.name, workspace=args.workspace, optimizer=args.optimizer, eval_name=eval_name)
+    elif args.mode == "simple-llm":
+        return _simple_llm_run(repo_root, spec_name=spec.name, workspace=args.workspace, optimizer=args.optimizer, eval_name=eval_name, provider_kind=args.provider)
+    else:
+        raise SystemExit(f"Unknown run mode: {args.mode}")
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
@@ -157,11 +208,13 @@ def build_parser() -> argparse.ArgumentParser:
     geval.add_argument("description")
     geval.set_defaults(func=cmd_generate_eval)
 
-    run = sub.add_parser("run", help="Run optimization (baseline-only in v0.1 MVP)")
+    run = sub.add_parser("run", help="Run optimization")
     run.add_argument("--spec", required=True)
     run.add_argument("--workspace", required=True)
     run.add_argument("--optimizer", default="alphaevolve")
     run.add_argument("--eval", required=False)
+    run.add_argument("--mode", choices=["baseline", "simple-llm"], default="baseline")
+    run.add_argument("--provider", choices=["openai", "stub"], default="stub")
     run.set_defaults(func=cmd_run)
 
     insp = sub.add_parser("inspect", help="Inspect latest run in workspace")

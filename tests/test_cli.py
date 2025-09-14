@@ -182,3 +182,43 @@ def test_add_candidate_stores_content_addressed(tmp_path: Path):
     assert leaves, "expected at least one stored candidate"
     cdir = leaves[0].parent
     assert (cdir / "parent").exists()
+
+
+def test_run_simple_llm_stub_creates_candidate_and_metrics(tmp_path: Path):
+    # Setup spec/eval
+    run_cli(tmp_path, "generate-spec", "myspec", "desc")
+    run_cli(tmp_path, "generate-eval", "--spec", "myspec", "walltime", "measure")
+    _prepare_eval_commands_echo_ok(tmp_path)
+    # Pinned file with region and target content so stub can patch
+    _write_pinned_file(tmp_path)
+
+    # Run simple-llm with stub provider
+    code = run_cli(
+        tmp_path,
+        "run",
+        "--spec",
+        "myspec",
+        "--workspace",
+        "ws2",
+        "--mode",
+        "simple-llm",
+        "--provider",
+        "stub",
+    )
+    assert code == 0
+
+    # Validate run structure: baseline + one candidate with metrics
+    runs_root = tmp_path / ".sigil" / "myspec" / "workspaces" / "ws2" / "runs"
+    rd = sorted([p for p in runs_root.iterdir() if p.is_dir()])[-1]
+    index = json.loads((rd / "index.json").read_text())
+    nodes = index.get("nodes", [])
+    assert len(nodes) == 2
+    baseline = next(n for n in nodes if n["id"] == "BASELINE")
+    candidate = next(n for n in nodes if n["id"] != "BASELINE")
+    # candidate directory
+    croot = rd / "candidates"
+    leaves = list(croot.rglob("patch.diff"))
+    assert leaves, "expected candidate patch stored"
+    cdir = leaves[0].parent
+    assert (cdir / "metrics.json").exists()
+    assert (cdir / "logs.txt").exists()

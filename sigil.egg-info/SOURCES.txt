@@ -5,6 +5,8 @@ sigil/__main__.py
 sigil/cli.py
 sigil/config.py
 sigil/evals.py
+sigil/llm.py
+sigil/optimizer_simple.py
 sigil/patches.py
 sigil/spec.py
 sigil/utils.py

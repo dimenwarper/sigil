@@ -6,7 +6,7 @@ bootstrap:
 	bash scripts/uv-bootstrap.sh
 
 test:
-	. .venv/bin/activate && pytest -q
+	uv run pytest -q
 
 clean:
 	rm -rf .venv .pytest_cache **/__pycache__
