@@ -1,0 +1,16 @@
+version: '0.1'
+name: symbolic_regression
+description: Optimize f(x) = x to f(x) = x**2 through symbolic regression
+repo_root: .
+evals:
+- quadratic_correctness
+pins:
+- id: target_function
+  language: python
+  files:
+  - target_function.py
+  symbol: null
+  ast_query: null
+  uuid: ce26ea3e-b41e-4413-a00a-1dd9f2d04d50
+base_commit: null
+id: c80c91ec-00c6-402f-aeaf-0a351011f961

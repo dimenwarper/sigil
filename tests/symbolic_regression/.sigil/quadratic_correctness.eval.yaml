@@ -1,0 +1,21 @@
+version: '0.1'
+name: quadratic_correctness
+description: Evaluate correctness of f(x) = x**2 transformation
+inputs:
+  generator: null
+metrics:
+- id: correctness
+  kind: checker
+  command: python3 test_correctness.py
+  parse: exit_code==0
+aggregate:
+  objective: min(latency_ms) subject_to correctness==true
+  tie_breakers:
+  - mean(latency_ms)
+accept:
+  rule: correctness==true
+budgets:
+  candidate_timeout_s: 60
+  total_wall_clock_h: 1
+replay:
+  seed: 17
