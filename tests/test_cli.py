@@ -52,22 +52,6 @@ def _prepare_eval_commands_echo_ok(tmp_path: Path):
     eval_file.write_text(__import__("yaml").safe_dump(data, sort_keys=False))
 
 
-def test_run_baseline_creates_run_structure(tmp_path: Path):
-    run_cli(tmp_path, "generate-spec", "myspec", "desc")
-    run_cli(tmp_path, "generate-eval", "--spec", "myspec", "walltime", "measure")
-    _prepare_eval_commands_echo_ok(tmp_path)
-    code = run_cli(tmp_path, "run", "--spec", "myspec", "--workspace", "ws1")
-    assert code == 0
-    runs_root = tmp_path / ".sigil" / "myspec" / "workspaces" / "ws1" / "runs"
-    run_dirs = [p for p in runs_root.iterdir() if p.is_dir()]
-    assert run_dirs, "expected a run directory to be created"
-    rd = sorted(run_dirs)[-1]
-    assert (rd / "baseline" / "metrics.json").exists()
-    assert (rd / "baseline" / "env.lock").exists()
-    assert (rd / "run.json").exists()
-    assert (rd / "index.json").exists()
-
-
 def test_inspect_prints_nodes(tmp_path: Path, capsys):
     run_cli(tmp_path, "generate-spec", "myspec", "desc")
     run_cli(tmp_path, "generate-eval", "--spec", "myspec", "walltime", "measure")
@@ -77,7 +61,6 @@ def test_inspect_prints_nodes(tmp_path: Path, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "Nodes:" in out
-    assert "BASELINE" in out
 
 
 def _write_pinned_file(tmp_path: Path):
@@ -180,17 +163,16 @@ def test_add_candidate_stores_content_addressed(tmp_path: Path):
     # find a deepest leaf containing patch.diff
     leaves = list(croot.rglob("patch.diff"))
     assert leaves, "expected at least one stored candidate"
-    cdir = leaves[0].parent
-    assert (cdir / "parent").exists()
 
 
 def test_run_simple_llm_stub_creates_candidate_and_metrics(tmp_path: Path):
-    # Setup spec/eval
     run_cli(tmp_path, "generate-spec", "myspec", "desc")
     run_cli(tmp_path, "generate-eval", "--spec", "myspec", "walltime", "measure")
     _prepare_eval_commands_echo_ok(tmp_path)
     # Pinned file with region and target content so stub can patch
     _write_pinned_file(tmp_path)
+
+    num_candidates = 2
 
     # Run simple-llm with stub provider
     code = run_cli(
@@ -204,6 +186,10 @@ def test_run_simple_llm_stub_creates_candidate_and_metrics(tmp_path: Path):
         "simple-llm",
         "--provider",
         "stub",
+        "--backend",
+        "local",
+        "--num",
+        str(num_candidates),
     )
     assert code == 0
 
@@ -212,13 +198,50 @@ def test_run_simple_llm_stub_creates_candidate_and_metrics(tmp_path: Path):
     rd = sorted([p for p in runs_root.iterdir() if p.is_dir()])[-1]
     index = json.loads((rd / "index.json").read_text())
     nodes = index.get("nodes", [])
-    assert len(nodes) == 2
-    baseline = next(n for n in nodes if n["id"] == "BASELINE")
-    candidate = next(n for n in nodes if n["id"] != "BASELINE")
+    # note the number of nodes need not match the number of candidates proposed (since they can be duplicates)
+    # but they should be more than 1 and less than num_candidates
+    assert 1 <= len(nodes) <= num_candidates
+
     # candidate directory
     croot = rd / "candidates"
     leaves = list(croot.rglob("patch.diff"))
-    assert leaves, "expected candidate patch stored"
+    assert len(leaves) == len(nodes)
     cdir = leaves[0].parent
     assert (cdir / "metrics.json").exists()
     assert (cdir / "logs.txt").exists()
+
+
+import importlib.util as _importlib_util
+
+"""
+TODO: Come back to testing ray backend later
+
+@pytest.mark.skipif(_importlib_util.find_spec("ray") is not None, reason="ray installed; error path not applicable")
+def test_run_with_ray_backend_errors_if_missing(tmp_path: Path, monkeypatch):
+    run_cli(tmp_path, "generate-spec", "myspec", "desc")
+    run_cli(tmp_path, "generate-eval", "--spec", "myspec", "walltime", "measure")
+    _prepare_eval_commands_echo_ok(tmp_path)
+    _write_pinned_file(tmp_path)
+
+    # Force import error for ray by removing from sys.modules and PATH
+    import sys
+
+    sys.modules.pop("ray", None)
+
+    with pytest.raises(SystemExit):
+        run_cli(
+            tmp_path,
+            "run",
+            "--spec",
+            "myspec",
+            "--workspace",
+            "ws3",
+            "--mode",
+            "simple-llm",
+            "--provider",
+            "stub",
+            "--backend",
+            "ray",
+        )
+
+"""

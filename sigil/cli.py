@@ -6,21 +6,16 @@ from pathlib import Path
 from typing import Any, Dict
 
 from . import __version__
-from .config import load_global_config
-from .evals import EvalDef, load_eval, run_eval_commands, scaffold_eval
+from .evals import load_eval, scaffold_eval
 from .spec import load_spec, scaffold_spec
 from .patches import (
     validate_patch_against_pins,
     store_candidate,
-    canonicalize_diff,
-    make_patched_worktree,
+    Candidate,
 )
-from .workspace import ws_path, runs_path
-from .optimizer_simple import get_provider, propose_once
+from .optimization import get_provider, SimpleOptimizer
+from .backend import get_backend, Backend, EvalResult
 from .workspace import (
-    baseline_dir,
-    capture_env_lock,
-    candidates_root,
     run_dir,
     run_id,
     runs_path,
@@ -42,82 +37,54 @@ def cmd_generate_eval(args: argparse.Namespace) -> int:
     return 0
 
 
-def _baseline_only_run(repo_root: Path, spec_name: str, workspace: str, optimizer: str, eval_name: str) -> int:
+def _run(
+    repo_root: Path,
+    spec_name: str,
+    workspace: str,
+    optimizer: str,
+    eval_name: str,
+    provider_kind: str,
+    backend_kind: str,
+    num: int,
+) -> int:
     rd = run_dir(repo_root, spec_name, workspace, run_id(optimizer))
-    bd = baseline_dir(rd)
-    bd.mkdir(parents=True, exist_ok=True)
-    # Snapshot empty patch
-    (bd / "patch.diff").write_text("")
-    # Load eval and run baseline
     eval_def = load_eval(repo_root, eval_name)
-    budgets = eval_def.budgets or {}
-    timeout = budgets.get("candidate_timeout_s")
-    results = run_eval_commands(eval_def, repo_root=repo_root, workdir=bd, timeout_s=timeout)
-    write_json(bd / "metrics.json", results)
-    write_json(bd / "env.lock", capture_env_lock(repo_root))
-    # Write run.json and index.json
-    run_info: Dict[str, Any] = {
-        "optimizer": optimizer,
-        "backend": "local",
-        "spec": spec_name,
-        "workspace": workspace,
-        "eval": eval_name,
-        "version": __version__,
-    }
-    write_json(rd / "run.json", run_info)
-    index: Dict[str, Any] = {
-        "nodes": [
-            {
-                "id": "BASELINE",
-                "parent": None,
-                "status": "evaluated",
-                "metrics": results.get("metrics", {}),
-            }
-        ],
-        "pareto_front": ["BASELINE"],
-    }
-    write_json(rd / "index.json", index)
-    print(f"Baseline run completed at {rd}")
-    return 0
 
-
-def _simple_llm_run(repo_root: Path, spec_name: str, workspace: str, optimizer: str, eval_name: str, provider_kind: str) -> int:
-    # Baseline first
-    rd = run_dir(repo_root, spec_name, workspace, run_id(optimizer))
-    bd = baseline_dir(rd)
-    bd.mkdir(parents=True, exist_ok=True)
-    (bd / "patch.diff").write_text("")
-    eval_def = load_eval(repo_root, eval_name)
-    timeout = (eval_def.budgets or {}).get("candidate_timeout_s")
-    base_results = run_eval_commands(eval_def, repo_root=repo_root, workdir=bd, timeout_s=timeout)
-    write_json(bd / "metrics.json", base_results)
-    write_json(bd / "env.lock", capture_env_lock(repo_root))
-
-    # Propose one candidate via LLM (or stub)
     spec = load_spec(repo_root, spec_name)
     provider = get_provider(provider_kind)
-    resp = propose_once(spec, provider)
-    patch_text = resp.patch
-    ok, msg = validate_patch_against_pins(patch_text, spec, parent_root=repo_root)
-    if not ok:
-        raise SystemExit(f"Proposed patch invalid: {msg}")
+    optimizer = SimpleOptimizer()
+    responses = optimizer.propose(spec, provider, num=max(1, num))
+    patches: list[str] = [r.patch for r in responses]
 
-    # Store candidate and evaluate in patched worktree
-    write_json(rd / "run.json", {"optimizer": optimizer, "backend": "local", "spec": spec_name, "workspace": workspace, "eval": eval_name})
-    digest, cdir = store_candidate(rd, patch_text, parent_id="BASELINE")
-    worktree = make_patched_worktree(repo_root, patch_text)
-    cand_results = run_eval_commands(eval_def, repo_root=worktree, workdir=cdir, timeout_s=timeout)
-    write_json(cdir / "metrics.json", cand_results)
-    (cdir / "logs.txt").write_text("candidate evaluated")
-    index: Dict[str, Any] = {
-        "nodes": [
-            {"id": "BASELINE", "parent": None, "status": "evaluated", "metrics": base_results.get("metrics", {})},
-            {"id": digest, "parent": "BASELINE", "status": "evaluated", "metrics": cand_results.get("metrics", {})},
-        ],
-        "pareto_front": [digest],
-    }
-    write_json(rd / "index.json", index)
-    print(f"Simple LLM run completed at {rd}; candidate {digest}")
+    # Validate and store candidates
+    candidates = set()
+    nodes: list[Dict[str, Any]] = []
+    for patch_text in patches:
+        ok, msg = validate_patch_against_pins(patch_text, spec, parent_root=repo_root)
+        if not ok:
+            raise SystemExit(f"Proposed patch invalid: {msg}")
+        digest, cdir = store_candidate(rd, patch_text)
+        candidates.add(Candidate(digest, patch_text))
+    candidates = list(candidates)
+
+    # Evaluate in selected backend
+    backend: Backend = get_backend(backend_kind)
+    results: list[EvalResult] = backend.evaluate(eval_def, repo_root, candidates)
+    # Write candidate results and build index
+    for res, candidate in zip(results, candidates):
+        cdir = rd / "candidates" / res.id[:2] / res.id[2:4] / res.id
+        write_json(cdir / "metrics.json", {"metrics": res.metrics, "logs": res.logs, "error": res.error})
+        (cdir / "logs.txt").write_text("candidate evaluated")
+        nodes.append({
+            "id": res.id, 
+            "status": "evaluated" if not res.error else "error", 
+            "metrics": res.metrics,
+            "candidate": candidate.id,
+            }
+        )
+    write_json(rd / "index.json", {"nodes": nodes})
+    write_json(rd / "run.json", {"optimizer": optimizer.__class__.__name__, "backend": backend_kind, "spec": spec_name, "workspace": workspace, "eval": eval_name})
+    print(f"Simple LLM run completed at {rd}; candidates: {[it.id for it in candidates]}")
     return 0
 
 
@@ -128,12 +95,16 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not spec.evals:
         raise SystemExit("Spec has no evals linked. Use generate-eval or add one.")
     eval_name = args.eval or spec.evals[0]
-    if args.mode == "baseline":
-        return _baseline_only_run(repo_root, spec_name=spec.name, workspace=args.workspace, optimizer=args.optimizer, eval_name=eval_name)
-    elif args.mode == "simple-llm":
-        return _simple_llm_run(repo_root, spec_name=spec.name, workspace=args.workspace, optimizer=args.optimizer, eval_name=eval_name, provider_kind=args.provider)
-    else:
-        raise SystemExit(f"Unknown run mode: {args.mode}")
+    return _run(
+        repo_root, 
+        spec_name=spec.name, 
+        workspace=args.workspace, 
+        optimizer=args.optimizer, 
+        eval_name=eval_name,
+        provider_kind=args.provider,
+        backend_kind=args.backend,
+        num=args.num
+        )
 
 
 def cmd_inspect(args: argparse.Namespace) -> int:
@@ -215,6 +186,8 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--eval", required=False)
     run.add_argument("--mode", choices=["baseline", "simple-llm"], default="baseline")
     run.add_argument("--provider", choices=["openai", "stub"], default="stub")
+    run.add_argument("--backend", choices=["local", "ray"], default="local")
+    run.add_argument("--num", type=int, default=1, help="Number of candidates to propose (simple-llm mode)")
     run.set_defaults(func=cmd_run)
 
     insp = sub.add_parser("inspect", help="Inspect latest run in workspace")

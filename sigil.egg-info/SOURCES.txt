@@ -2,6 +2,7 @@ README.md
 pyproject.toml
 sigil/__init__.py
 sigil/__main__.py
+sigil/backend.py
 sigil/cli.py
 sigil/config.py
 sigil/evals.py

@@ -4,13 +4,19 @@ import io
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import shutil
 import os
 import tempfile
 
 from .spec import Spec
 from .utils import content_addressed_path, ensure_dir, sha256_hex, write_text
+
+
+@dataclass(frozen=True)
+class Candidate:
+    id: str
+    patch_text: str
 
 
 @dataclass
@@ -166,8 +172,8 @@ def candidate_store_path(run_dir: Path, digest_hex: str) -> Path:
 def store_candidate(
     run_dir: Path,
     patch_text: str,
-    parent_id: str,
     seed: Optional[int] = None,
+    parent_id: Optional[str] = None,
     prompt_json: Optional[Dict] = None,
 ) -> Tuple[str, Path]:
     canon = canonicalize_diff(patch_text)
@@ -175,7 +181,8 @@ def store_candidate(
     cdir = candidate_store_path(run_dir, digest)
     ensure_dir(cdir)
     write_text(cdir / "patch.diff", canon)
-    write_text(cdir / "parent", parent_id)
+    if parent_id is not None:
+        write_text(cdir / "parent", parent_id)
     if seed is not None:
         write_text(cdir / "seed", str(seed))
     if prompt_json is not None:
