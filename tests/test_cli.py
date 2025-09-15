@@ -211,6 +211,72 @@ def test_run_simple_llm_stub_creates_candidate_and_metrics(tmp_path: Path):
     assert (cdir / "logs.txt").exists()
 
 
+def test_sigil_run_in_symbolic_regression_directory():
+    """Test that sigil run works in the symbolic_regression subdirectory"""
+    import subprocess
+    import os
+    
+    # Get the path to the symbolic_regression directory
+    test_dir = Path(__file__).parent
+    symbolic_regression_dir = test_dir / "symbolic_regression"
+    
+    # Ensure we're in the right directory
+    assert symbolic_regression_dir.exists(), f"Symbolic regression directory not found: {symbolic_regression_dir}"
+    assert (symbolic_regression_dir / ".sigil" / "symbolic_regression.sigil.yaml").exists(), "Spec file not found"
+    assert (symbolic_regression_dir / ".sigil" / "quadratic_correctness.eval.yaml").exists(), "Eval file not found"
+    assert (symbolic_regression_dir / "target_function.py").exists(), "Target function file not found"
+    assert (symbolic_regression_dir / "test_correctness.py").exists(), "Test correctness file not found"
+    
+    # Change to the symbolic_regression directory and run sigil
+    original_cwd = os.getcwd()
+    try:
+        os.chdir(symbolic_regression_dir)
+        
+        # Run sigil run command with stub provider to avoid external dependencies
+        result = subprocess.run([
+            "python", "-m", "sigil", "run",
+            "--spec", "symbolic_regression",
+            "--workspace", "test_workspace",
+            "--mode", "simple-llm",
+            "--provider", "stub",
+            "--backend", "local",
+            "--num", "2"
+        ], capture_output=True, text=True, timeout=60)
+        
+        # Check that the command completed successfully
+        assert result.returncode == 0, f"sigil run failed with code {result.returncode}. stdout: {result.stdout}, stderr: {result.stderr}"
+        
+        # Verify that output contains expected information
+        assert "Simple LLM run completed" in result.stdout, f"Expected completion message not found in output: {result.stdout}"
+        
+        # Verify that run directory and files were created
+        sigil_dir = symbolic_regression_dir / ".sigil"
+        workspace_dir = sigil_dir / "symbolic_regression" / "workspaces" / "test_workspace" / "runs"
+        
+        assert workspace_dir.exists(), f"Workspace runs directory not created: {workspace_dir}"
+        
+        # Find the latest run directory
+        run_dirs = [d for d in workspace_dir.iterdir() if d.is_dir()]
+        assert len(run_dirs) > 0, "No run directories found"
+        
+        latest_run = sorted(run_dirs)[-1]
+        
+        # Verify expected files exist in the run directory
+        assert (latest_run / "index.json").exists(), "index.json not found in run directory"
+        assert (latest_run / "run.json").exists(), "run.json not found in run directory"
+        assert (latest_run / "candidates").exists(), "candidates directory not found in run directory"
+        
+        # Verify index.json contains nodes
+        index_data = json.loads((latest_run / "index.json").read_text())
+        assert "nodes" in index_data, "nodes key not found in index.json"
+        assert len(index_data["nodes"]) > 0, "No nodes found in index.json"
+        
+        print(f"Test passed: sigil run completed successfully in {latest_run}")
+        
+    finally:
+        os.chdir(original_cwd)
+
+
 import importlib.util as _importlib_util
 
 """

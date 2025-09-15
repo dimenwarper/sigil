@@ -24,7 +24,7 @@ class PatchResponse(BaseModel):
 
 
 class LLMProvider:
-    def propose(self, req: PatchRequest) -> PatchResponse:
+    def propose(self, req: PatchRequest, system_prompt: Optional[str] = None) -> PatchResponse:
         raise NotImplementedError
 
 
@@ -42,16 +42,34 @@ class OpenAICompatibleProvider(LLMProvider):
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         self.model = model or os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 
-    def propose(self, req: PatchRequest) -> PatchResponse:
+    def generate(self, messages: list) -> str:
+        """Generate completion from LLM given messages."""
         if not self.api_key:
             raise RuntimeError("OPENAI_API_KEY not set")
+        
+        url = self.base_url.rstrip("/") + "/chat/completions"
+        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
+        payload = {
+            "model": self.model,
+            "temperature": 0.2,
+            "messages": messages,
+        }
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            data = resp.json()
+        return data["choices"][0]["message"]["content"]
+
+    def propose(self, req: PatchRequest, system_prompt: Optional[str] = None) -> PatchResponse:
+        default_system_prompt = (
+            "You are an expert code optimizer. Return ONLY JSON matching the schema: "
+            "{\"patch\": string, \"rationale\": string}. The patch MUST be a unified diff."
+        )
+        
         messages = [
             {
                 "role": "system",
-                "content": (
-                    "You are an expert code optimizer. Return ONLY JSON matching the schema: "
-                    "{\"patch\": string, \"rationale\": string}. The patch MUST be a unified diff."
-                ),
+                "content": system_prompt or default_system_prompt,
             },
             {
                 "role": "user",
@@ -67,18 +85,8 @@ class OpenAICompatibleProvider(LLMProvider):
             },
         ]
 
-        url = self.base_url.rstrip("/") + "/chat/completions"
-        headers = {"Authorization": f"Bearer {self.api_key}", "Content-Type": "application/json"}
-        payload = {
-            "model": self.model,
-            "temperature": 0.2,
-            "messages": messages,
-        }
-        with httpx.Client(timeout=60.0) as client:
-            resp = client.post(url, headers=headers, json=payload)
-            resp.raise_for_status()
-            data = resp.json()
-        content = data["choices"][0]["message"]["content"]
+        content = self.generate(messages)
+        
         # Attempt to parse JSON; if content has code fences, strip them
         try:
             text = content.strip()
@@ -97,7 +105,7 @@ class StubProvider(LLMProvider):
     Not a real LLM; returns a minimal unified diff changing 'x = 1' to 'x = 2' when possible.
     """
 
-    def propose(self, req: PatchRequest) -> PatchResponse:
+    def propose(self, req: PatchRequest, system_prompt: Optional[str] = None) -> PatchResponse:
         # Heuristic: find a python file containing 'x = 1' under a SIGIL region and flip to 2
         target_path = None
         original = None
