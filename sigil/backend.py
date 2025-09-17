@@ -35,7 +35,7 @@ class LocalBackend(Backend):
             worktree = make_patched_worktree(repo_root, candidate.patch_text)
             budgets = eval_def.budgets or {}
             timeout = budgets.get("candidate_timeout_s")
-            out = run_eval_commands(eval_def, repo_root=worktree, workdir=worktree, timeout_s=timeout)
+            out = run_eval_commands(eval_def, repo_root=worktree, timeout_s=timeout)
             return EvalResult(id=candidate.id, metrics=out.get("metrics", {}), logs=out.get("logs", {}))
         except Exception as e:
             return EvalResult(id=candidate.id, metrics={}, logs={}, error=str(e))
@@ -76,7 +76,7 @@ class RayBackend(Backend):
                 worktree = make_patched_worktree(Path(repo_root), item.patch_text)
                 budgets = eval_def.budgets or {}
                 timeout = budgets.get("candidate_timeout_s")
-                out = run_eval_commands(eval_def, repo_root=worktree, workdir=worktree, timeout_s=timeout)
+                out = run_eval_commands(eval_def, repo_root=worktree, timeout_s=timeout)
                 return EvalResult(id=item.id, metrics=out.get("metrics", {}), logs=out.get("logs", {}))
             except Exception as e:
                 return EvalResult(id=item.id, metrics={}, logs={}, error=str(e))

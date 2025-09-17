@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -9,10 +10,16 @@ import yaml
 from .utils import CmdResult, parse_regex_value, run_cmd, safe_env
 
 
+class MetricKind(Enum):
+    CHECKER = "checker"
+    TIMER = "timer"
+    NUMERIC = "numeric"
+
+
 @dataclass
 class MetricDef:
     id: str
-    kind: str  # "timer" | "checker"
+    kind: MetricKind
     command: str
     parse: Optional[str] = None
 
@@ -38,7 +45,13 @@ def load_eval(repo_root: Path, name: str) -> EvalDef:
     if not p.exists():
         raise FileNotFoundError(f"Eval not found: {p}")
     data = yaml.safe_load(p.read_text()) or {}
-    metrics = [MetricDef(**m) for m in (data.get("metrics") or [])]
+    metrics = []
+    for m in (data.get("metrics") or []):
+        metric_data = dict(m)
+        # Convert string kind to enum
+        if "kind" in metric_data:
+            metric_data["kind"] = MetricKind(metric_data["kind"])
+        metrics.append(MetricDef(**metric_data))
     inputs = None
     if isinstance(data.get("inputs"), dict):
         inputs = data["inputs"].get("generator")
@@ -68,7 +81,7 @@ def scaffold_eval(repo_root: Path, spec_name: str, eval_name: str, description: 
         "metrics": [
             {
                 "id": "correctness",
-                "kind": "checker",
+                "kind": MetricKind.CHECKER.value,
                 "command": "python -c 'import sys; sys.exit(0)'",
                 "parse": "exit_code==0",
             }
@@ -100,7 +113,7 @@ def scaffold_eval(repo_root: Path, spec_name: str, eval_name: str, description: 
 
 
 def _parse_metric_value(metric: MetricDef, res: CmdResult) -> Any:
-    if metric.kind == "checker":
+    if metric.kind == MetricKind.CHECKER:
         # default checker: success if exit code 0
         if metric.parse:
             if metric.parse.strip() == "exit_code==0":
@@ -109,7 +122,7 @@ def _parse_metric_value(metric: MetricDef, res: CmdResult) -> Any:
             val = parse_regex_value(metric.parse, res.stdout)
             return bool(val)
         return res.returncode == 0
-    elif metric.kind == "timer":
+    elif metric.kind == MetricKind.TIMER:
         # prefer regex parse from stdout
         if metric.parse:
             val = parse_regex_value(metric.parse, res.stdout)
@@ -119,6 +132,19 @@ def _parse_metric_value(metric: MetricDef, res: CmdResult) -> Any:
                 return None
         # fallback: wall time in ms from CmdResult.duration_s
         return res.duration_s * 1000.0
+    elif metric.kind == MetricKind.NUMERIC:
+        # numeric value: parse as float from stdout using regex
+        if metric.parse:
+            val = parse_regex_value(metric.parse, res.stdout)
+            try:
+                return float(val) if val is not None else None
+            except Exception:
+                return None
+        # fallback: try to parse entire stdout as float
+        try:
+            return float(res.stdout.strip())
+        except Exception:
+            return None
     else:
         return None
 
@@ -126,7 +152,6 @@ def _parse_metric_value(metric: MetricDef, res: CmdResult) -> Any:
 def run_eval_commands(
     eval_def: EvalDef,
     repo_root: Path,
-    workdir: Path,
     timeout_s: Optional[int] = None,
 ) -> Dict[str, Any]:
     env = safe_env()
