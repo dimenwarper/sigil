@@ -5,15 +5,15 @@ inputs:
   generator: null
 metrics:
 - id: correctness
-  kind: checker
+  kind: numeric
   command: python3 test_correctness.py
-  parse: exit_code==0
+  parse: "SCORE: ([0-9.]+)"
 aggregate:
-  objective: min(latency_ms) subject_to correctness==true
+  objective: max(correctness)
   tie_breakers:
-  - mean(latency_ms)
+  - mean(correctness)
 accept:
-  rule: correctness==true
+  rule: correctness>=100.0
 budgets:
   candidate_timeout_s: 60
   total_wall_clock_h: 1

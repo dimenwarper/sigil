@@ -14,28 +14,28 @@ from target_function import f
 
 
 def test_quadratic_behavior():
-    """Test that the function behaves like f(x) = x**2"""
+    """Test that the function behaves like f(x) = x**2 and return accuracy score"""
     test_cases = [0, 1, 2, 3, -1, -2, 0.5, 1.5]
+    
+    total_tests = len(test_cases)
+    passed_tests = 0
     tolerance = 1e-10
     
-    all_passed = True
     for x in test_cases:
         result = f(x)
         expected = x**2
         
-        if abs(result - expected) > tolerance:
-            print(f"FAIL: f({x}) = {result}, expected {expected}")
-            all_passed = False
-        else:
+        if abs(result - expected) <= tolerance:
             print(f"PASS: f({x}) = {result}")
+            passed_tests += 1
+        else:
+            print(f"FAIL: f({x}) = {result}, expected {expected}")
     
-    if all_passed:
-        print("All tests passed! Function is correctly f(x) = x**2")
-        sys.exit(0)
-    else:
-        print("Some tests failed! Function is not yet f(x) = x**2")
-        sys.exit(1)
-
+    # Calculate accuracy as percentage of passed tests
+    accuracy = (passed_tests / total_tests) * 100.0
+    print(f"Accuracy: {accuracy:.1f}%")
+    print(f"SCORE: {accuracy}")
+    
 
 if __name__ == "__main__":
     test_quadratic_behavior()
