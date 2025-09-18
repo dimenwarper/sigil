@@ -220,18 +220,26 @@ def test_sigil_run_in_symbolic_regression_directory():
     assert (symbolic_regression_dir / "target_function.py").exists(), "Target function file not found"
     assert (symbolic_regression_dir / "test_correctness.py").exists(), "Test correctness file not found"
     
+    # Check if OpenAI API key is available and configure LLM accordingly
+    use_openai = os.getenv("OPENAI_API_KEY") is not None
+    if use_openai:
+        llm_args = ["--llm", "simple-llm", "--provider", "openai"]
+        print("Using OpenAI provider for testing")
+    else:
+        llm_args = ["--llm", "simple-llm", "--provider", "stub"]
+        print("Using stub provider for testing (set OPENAI_API_KEY to test with real LLM)")
+    
     # Change to the symbolic_regression directory and run sigil
     original_cwd = os.getcwd()
     try:
         os.chdir(symbolic_regression_dir)
         
-        # Run sigil run command with stub provider to avoid external dependencies
+        # Run sigil run command
         result = subprocess.run([
             "python", "-m", "sigil", "run",
             "--spec", "symbolic_regression",
             "--workspace", "test_workspace",
-            "--llm", "simple-llm",
-            "--provider", "stub",
+            *llm_args,
             "--backend", "local",
             "--num", "2"
         ], capture_output=True, text=True, timeout=60)
