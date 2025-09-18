@@ -100,17 +100,17 @@ class OpenAICompatibleProvider(LLMProvider):
 
 
 class StubProvider(LLMProvider):
-    """A deterministic proposer for testing: increments constants within SIGIL regions.
+    """A deterministic proposer for testing: increments constants in pins.
 
     Not a real LLM; returns a minimal unified diff changing 'x = 1' to 'x = 2' when possible.
     """
 
     def propose(self, req: PatchRequest, system_prompt: Optional[str] = None) -> PatchResponse:
-        # Heuristic: find a python file containing 'x = 1' under a SIGIL region and flip to 2
+        # Heuristic: find a python file containing 'x = 1' and flip to 2
         target_path = None
         original = None
         for p, content in req.files.items():
-            if "SIGIL:BEGIN" in content and "x = 1" in content:
+            if "x = 1" in content:
                 target_path = p
                 original = content
                 break
@@ -138,5 +138,5 @@ class StubProvider(LLMProvider):
         patch = (
             f"--- a/{target_path}\n" f"+++ b/{target_path}\n" f"{hunk_header}\n" f"-x = 1\n" f"+x = 2\n"
         )
-        return PatchResponse(patch=patch, rationale="increment constant inside pin region")
+        return PatchResponse(patch=patch, rationale="increment constant in pins")
 

@@ -75,40 +75,14 @@ def parse_unified_diff(diff_text: str) -> UnifiedDiff:
     return UnifiedDiff(files)
 
 
-def _find_allowed_regions(file_path: Path, pin_ids: List[str]) -> List[Tuple[int, int]]:
-    # Regions are marked with lines like: "# SIGIL:BEGIN <id>" and "# SIGIL:END <id>"
-    text = file_path.read_text().splitlines()
-    regions: List[Tuple[int, int]] = []
-    stack: Dict[str, int] = {}
-    for idx, line in enumerate(text, start=1):
-        m1 = re.search(r"SIGIL:BEGIN\s+([A-Za-z0-9_\-\.]+)", line)
-        if m1:
-            pid = m1.group(1)
-            if pid in pin_ids:
-                stack[pid] = idx
-        m2 = re.search(r"SIGIL:END\s+([A-Za-z0-9_\-\.]+)", line)
-        if m2:
-            pid = m2.group(1)
-            if pid in pin_ids and pid in stack:
-                start = stack.pop(pid)
-                regions.append((start, idx))
-    return sorted(regions)
-
-
-def _line_in_regions(line_no: int, regions: List[Tuple[int, int]]) -> bool:
-    for a, b in regions:
-        if a <= line_no <= b:
-            return True
-    return False
 
 
 def validate_patch_against_pins(diff_text: str, spec: Spec, parent_root: Path) -> Tuple[bool, str]:
     """
-    Validate that all changes in diff_text occur only within pin-declared files and
-    within allowed regions marked by SIGIL markers that reference pin ids.
+    Validate that all changes in diff_text occur only within pin-declared files.
     """
     ud = parse_unified_diff(diff_text)
-    # Build mapping: file -> allowed regions from relevant pins
+    # Build mapping: file -> pin ids
     pin_file_map: Dict[str, List[str]] = {}
     for p in spec.pins:
         for f in (p.files or []):
@@ -129,31 +103,6 @@ def validate_patch_against_pins(diff_text: str, spec: Spec, parent_root: Path) -
         abs_path = parent_root / rel_path
         if not abs_path.exists():
             return False, f"Target file does not exist in parent: {rel_path}"
-        regions = _find_allowed_regions(abs_path, pin_file_map[rel_path])
-        if not regions:
-            return False, f"No SIGIL regions found for pinned ids in {rel_path}"
-        # Walk hunks tracking original line cursor to validate +/- locations
-        for h in f.hunks:
-            oline = h.old_start
-            nline = h.new_start
-            for entry in h.lines:
-                tag = entry[:1]
-                if tag == ' ':
-                    oline += 1
-                    nline += 1
-                elif tag == '-':
-                    if not _line_in_regions(oline, regions):
-                        return False, f"Deletion at {rel_path}:{oline} outside SIGIL regions"
-                    oline += 1
-                elif tag == '+':
-                    # insertion position should be within or directly adjacent to a region by current original cursor
-                    check_line = max(1, oline)
-                    if not _line_in_regions(check_line, regions) and not _line_in_regions(check_line - 1, regions):
-                        return False, f"Insertion near {rel_path}:{check_line} outside SIGIL regions"
-                    nline += 1
-                else:
-                    # unknown marker
-                    return False, f"Invalid hunk line marker in diff: {entry[:10]}"
     return True, "ok"
 
 

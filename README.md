@@ -172,4 +172,4 @@ A published candidate is a portable artifact that others can fetch, replay, and 
 
 ## 9. Opinionated defaults
 
-YAML everywhere for human inspection. Unified diffs as the only edit format, with AST validation to ensure syntactic integrity. Tree‑sitter for pins when available; plain regex region markers as a lowest common denominator. Population‑based search first; annealing and RL later. Hermetic containers for every eval. Redacted but preserved LLM prompts for audit. No optimizer has permission to mutate outside declared pins. Correctness is non‑negotiable; performance wins are otherwise meaningless.
+YAML everywhere for human inspection. Unified diffs as the only edit format, with AST validation to ensure syntactic integrity. Tree‑sitter for pins when available; file and symbol-based targeting as the primary mechanism. Population‑based search first; annealing and RL later. Hermetic containers for every eval. Redacted but preserved LLM prompts for audit. No optimizer has permission to mutate outside declared pins. Correctness is non‑negotiable; performance wins are otherwise meaningless.

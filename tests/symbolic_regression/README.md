@@ -11,18 +11,14 @@ This directory contains a simple test case for the Sigil framework to optimize a
 
 ## Usage
 
-The SIGIL region in `target_function.py` is marked with:
+The target function in `target_function.py` contains:
 ```python
-# SIGIL:BEGIN target_function
 return x
-# SIGIL:END target_function
 ```
 
 The goal is to optimize this to:
 ```python
-# SIGIL:BEGIN target_function
 return x**2
-# SIGIL:END target_function
 ```
 
 ## Testing

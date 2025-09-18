@@ -5,9 +5,7 @@ The goal is to optimize f(x) = x to become f(x) = x**2.
 
 def f(x):
     """Function to be optimized from f(x) = x to f(x) = x**2"""
-    # SIGIL:BEGIN target_function
     return x
-    # SIGIL:END target_function
 
 
 def test_function():

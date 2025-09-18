@@ -71,9 +71,6 @@ def _write_pinned_file(tmp_path: Path):
         "\n".join(
             [
                 "# header",
-                "# SIGIL:BEGIN example_region",
-                "x = 1",
-                "# SIGIL:END example_region",
                 "",
             ]
         )
@@ -85,12 +82,10 @@ def _write_valid_diff(tmp_path: Path) -> Path:
     patch = (
         "--- a/src/example.py\n"
         "+++ b/src/example.py\n"
-        "@@ -1,4 +1,4 @@\n"
+        "@@ -1,2 +1,2 @@\n"
         " # header\n"
-        " # SIGIL:BEGIN example_region\n"
         "-x = 1\n"
         "+x = 2\n"
-        " # SIGIL:END example_region\n"
     )
     pf = tmp_path / "valid.diff"
     pf.write_text(patch)
@@ -99,14 +94,12 @@ def _write_valid_diff(tmp_path: Path) -> Path:
 
 def _write_invalid_diff(tmp_path: Path) -> Path:
     patch = (
-        "--- a/src/example.py\n"
-        "+++ b/src/example.py\n"
-        "@@ -1,4 +1,4 @@\n"
+        "--- a/src/dontmodify.py\n"
+        "+++ b/src/dontmodify.py\n"
+        "@@ -1,2 +1,2 @@\n"
         "-# header\n"
         "+# hacked\n"
-        " # SIGIL:BEGIN example_region\n"
         " x = 1\n"
-        " # SIGIL:END example_region\n"
     )
     pf = tmp_path / "invalid.diff"
     pf.write_text(patch)

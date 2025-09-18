@@ -9,7 +9,7 @@ pins:
   language: python
   files:
   - target_function.py
-  symbol: null
+  symbol: f 
   ast_query: null
   uuid: ce26ea3e-b41e-4413-a00a-1dd9f2d04d50
 base_commit: null
