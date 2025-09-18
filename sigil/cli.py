@@ -184,10 +184,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--workspace", required=True)
     run.add_argument("--optimizer", default="alphaevolve")
     run.add_argument("--eval", required=False)
-    run.add_argument("--mode", choices=["baseline", "simple-llm"], default="baseline")
+    run.add_argument("--llm", choices=["baseline", "simple-llm"], default="baseline")
     run.add_argument("--provider", choices=["openai", "stub"], default="stub")
     run.add_argument("--backend", choices=["local", "ray"], default="local")
-    run.add_argument("--num", type=int, default=1, help="Number of candidates to propose (simple-llm mode)")
+    run.add_argument("--num", type=int, default=1, help="Number of candidates to propose")
     run.set_defaults(func=cmd_run)
 
     insp = sub.add_parser("inspect", help="Inspect latest run in workspace")
