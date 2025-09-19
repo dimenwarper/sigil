@@ -57,7 +57,10 @@ class OpenAICompatibleProvider(LLMProvider):
         with httpx.Client(timeout=60.0) as client:
             resp = client.post(url, headers=headers, json=payload)
             resp.raise_for_status()
-            data = resp.json()
+            try:
+                data = resp.json()
+            except json.JSONDecodeError as e:
+                raise RuntimeError(f"API returned invalid JSON: {resp.text[:200]}...") from e
         return data["choices"][0]["message"]["content"]
 
     def propose(self, req: PatchRequest, system_prompt: Optional[str] = None) -> PatchResponse:
