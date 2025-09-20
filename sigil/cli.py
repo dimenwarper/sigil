@@ -149,24 +149,39 @@ def cmd_run(args: argparse.Namespace) -> int:
     # Load configuration
     config = Config.load(repo_root)
     
-    # Validate configuration
-    issues = config.validate()
-    if issues:
-        print("Configuration issues found:")
+    # Use config defaults if not specified via command line
+    provider_kind = args.provider if hasattr(args, 'provider') and args.provider else config.get_preferred_llm_provider()
+    backend_kind = args.backend if hasattr(args, 'backend') and args.backend else config.get_preferred_backend()
+    
+    # Only validate configuration if we're relying on config defaults
+    # If providers/backends are explicitly specified, we can skip validation
+    using_config_provider = not (hasattr(args, 'provider') and args.provider)
+    using_config_backend = not (hasattr(args, 'backend') and args.backend)
+    
+    if using_config_provider or using_config_backend:
+        issues = config.validate()
+        # Filter issues to only show relevant ones
+        relevant_issues = []
         for issue in issues:
-            print(f"  - {issue}")
-        print("Run 'sigil setup' to fix configuration issues.")
-        return 1
+            if using_config_provider and "LLM provider" in issue:
+                relevant_issues.append(issue)
+            elif using_config_backend and "backend" in issue:
+                relevant_issues.append(issue)
+            elif "version" in issue:  # Always show version issues
+                relevant_issues.append(issue)
+        
+        if relevant_issues:
+            print("Configuration issues found:")
+            for issue in relevant_issues:
+                print(f"  - {issue}")
+            print("Run 'sigil setup' to fix configuration issues.")
+            return 1
     
     # Load spec for validation
     spec = load_spec(repo_root, args.spec)
     if not spec.evals:
         raise SystemExit("Spec has no evals linked. Use generate-eval or add one.")
     eval_name = args.eval or spec.evals[0]
-    
-    # Use config defaults if not specified via command line
-    provider_kind = args.provider if hasattr(args, 'provider') and args.provider else config.get_preferred_llm_provider()
-    backend_kind = args.backend if hasattr(args, 'backend') and args.backend else config.get_preferred_backend()
     
     return _run(
         repo_root, 

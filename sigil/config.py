@@ -11,8 +11,8 @@ import yaml
 DEFAULT_CONFIG_DICT: Dict[str, Any] = {
     "version": "0.1",
     "llm": {
-        "primary_provider": "openai",
-        "fallback_provider": "stub",
+        "primary_provider": "stub",  # Use stub by default for reliability
+        "fallback_provider": "openai",
     },
     "backend": {
         "default": "local",
@@ -150,10 +150,7 @@ class Config:
         
         if fallback and fallback not in available_providers:
             issues.append(f"Fallback LLM provider '{fallback}' is not available")
-        elif fallback and not available_providers[fallback]["available"]:
-            missing_env = [env for env in available_providers[fallback]["requires_env"] if not os.getenv(env)]
-            if missing_env:  # Only warn if fallback needs env vars (stub doesn't)
-                issues.append(f"Fallback LLM provider '{fallback}' missing environment variables: {missing_env}")
+        # Don't validate fallback provider environment variables - it's only used as a fallback
         
         # Validate backend config
         backend_config = self.data.get("backend", {})
