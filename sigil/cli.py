@@ -2,39 +2,89 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from pathlib import Path
 from typing import Any, Dict
 
 from . import __version__
-from .evals import load_eval, scaffold_eval
-from .spec import load_spec, scaffold_spec
+from .evals import load_eval, scaffold_eval, generate_eval_with_llm
+from .spec import load_spec, scaffold_spec, generate_spec_with_llm
 from .patches import (
     validate_patch_against_pins,
     store_candidate,
     Candidate,
 )
-from .optimization import get_provider, SimpleOptimizer
-from .backend import get_backend, Backend, EvalResult
+from .optimization import SimpleOptimizer
+from .backend import EvalResult
 from .workspace import (
     run_dir,
     run_id,
     runs_path,
     write_json,
 )
+from .config import (
+    Config,
+    get_available_llm_providers,
+    get_available_backends,
+    DEFAULT_CONFIG_DICT,
+)
 
 
 def cmd_generate_spec(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
-    p = scaffold_spec(repo_root, args.name, args.description, args.repo_root)
-    print(f"Created spec: {p}")
-    return 0
+    
+    # Check if this is an LLM-powered generation request
+    if hasattr(args, 'via_description') and args.via_description:
+        # LLM-powered generation
+        target_files = None
+        if hasattr(args, 'files') and args.files:
+            target_files = args.files.split(',')
+        
+        try:
+            spec_path, eval_path = generate_spec_with_llm(
+                prompt=args.description,  # Use description as the prompt
+                repo_root=repo_root,
+                target_files=target_files
+            )
+            print(f"Generated spec: {spec_path}")
+            print(f"Generated eval: {eval_path}")
+            return 0
+        except Exception as e:
+            print(f"Error generating spec: {e}")
+            return 1
+    else:
+        # Traditional scaffold generation - name is required
+        if not args.name:
+            print("Error: 'name' argument is required when not using --llm")
+            return 1
+        p = scaffold_spec(repo_root, args.name, args.description, args.repo_root)
+        print(f"Created spec: {p}")
+        return 0
 
 
 def cmd_generate_eval(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
-    p = scaffold_eval(repo_root, args.spec, args.name, args.description)
-    print(f"Created eval: {p}")
-    return 0
+    
+    # Check if this is an LLM-powered generation request
+    if hasattr(args, 'via_description') and args.via_description:
+        # LLM-powered generation
+        try:
+            p = generate_eval_with_llm(
+                description=args.description,
+                spec_name=args.spec,
+                eval_name=args.name,
+                repo_root=repo_root
+            )
+            print(f"Generated eval: {p}")
+            return 0
+        except Exception as e:
+            print(f"Error generating eval: {e}")
+            return 1
+    else:
+        # Traditional scaffold generation
+        p = scaffold_eval(repo_root, args.spec, args.name, args.description)
+        print(f"Created eval: {p}")
+        return 0
 
 
 def _run(
@@ -50,8 +100,14 @@ def _run(
     rd = run_dir(repo_root, spec_name, workspace, run_id(optimizer))
     eval_def = load_eval(repo_root, eval_name)
 
+    # Load config for provider/backend creation
+    config = Config.load(repo_root)
+    
     spec = load_spec(repo_root, spec_name)
-    provider = get_provider(provider_kind)
+    
+    provider = config.get_llm_provider(provider_kind)
+    backend = config.get_backend(backend_kind)
+    
     optimizer = SimpleOptimizer()
     responses = optimizer.propose(spec, provider, num=max(1, num))
     patches: list[str] = [r.patch for r in responses]
@@ -68,7 +124,6 @@ def _run(
     candidates = list(candidates)
 
     # Evaluate in selected backend
-    backend: Backend = get_backend(backend_kind)
     results: list[EvalResult] = backend.evaluate(eval_def, repo_root, candidates)
     # Write candidate results and build index
     for res, candidate in zip(results, candidates):
@@ -90,19 +145,37 @@ def _run(
 
 def cmd_run(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
+    
+    # Load configuration
+    config = Config.load(repo_root)
+    
+    # Validate configuration
+    issues = config.validate()
+    if issues:
+        print("Configuration issues found:")
+        for issue in issues:
+            print(f"  - {issue}")
+        print("Run 'sigil setup' to fix configuration issues.")
+        return 1
+    
     # Load spec for validation
     spec = load_spec(repo_root, args.spec)
     if not spec.evals:
         raise SystemExit("Spec has no evals linked. Use generate-eval or add one.")
     eval_name = args.eval or spec.evals[0]
+    
+    # Use config defaults if not specified via command line
+    provider_kind = args.provider if hasattr(args, 'provider') and args.provider else config.get_preferred_llm_provider()
+    backend_kind = args.backend if hasattr(args, 'backend') and args.backend else config.get_preferred_backend()
+    
     return _run(
         repo_root, 
         spec_name=spec.name, 
         workspace=args.workspace, 
         optimizer=args.optimizer, 
         eval_name=eval_name,
-        provider_kind=args.provider,
-        backend_kind=args.backend,
+        provider_kind=provider_kind,
+        backend_kind=backend_kind,
         num=args.num
         )
 
@@ -162,21 +235,156 @@ def cmd_add_candidate(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_setup(args: argparse.Namespace) -> int:
+    """Interactive setup command to configure Sigil."""
+    repo_root = Path(args.repo_root).resolve()
+    
+    print("🔧 Sigil Configuration Setup")
+    print("=" * 40)
+    
+    # Load existing config or start with defaults
+    config_file = repo_root / "sigil.yaml"
+    if config_file.exists():
+        print(f"Found existing configuration at {config_file}")
+        config = Config.load(repo_root)
+        print("Current configuration will be updated.")
+    else:
+        print("Creating new configuration...")
+        config = Config(DEFAULT_CONFIG_DICT.copy())
+    
+    print()
+    
+    # Configure LLM providers
+    print("📡 LLM Provider Configuration")
+    print("-" * 30)
+    
+    available_providers = get_available_llm_providers()
+    
+    # Show available providers
+    print("Available LLM providers:")
+    for name, provider_info in available_providers.items():
+        description = provider_info.get("description", "")
+        status = "✓" if provider_info["available"] else "✗"
+        print(f"  {name}: {status} {description}")
+        if not provider_info["available"] and provider_info.get("requires_env"):
+            missing = [env for env in provider_info["requires_env"] if not os.getenv(env)]
+            if missing:
+                print(f"    Missing: {', '.join(missing)}")
+    
+    print()
+    llm_config = config.data.get("llm", {})
+    current_primary = llm_config.get("primary_provider", "openai")
+    primary = input(f"Primary LLM provider [{current_primary}]: ").strip() or current_primary
+    
+    current_fallback = llm_config.get("fallback_provider", "stub")
+    fallback = input(f"Fallback LLM provider [{current_fallback}]: ").strip() or current_fallback
+    
+    # Update LLM config
+    config.data.setdefault("llm", {})
+    config.data["llm"]["primary_provider"] = primary
+    config.data["llm"]["fallback_provider"] = fallback
+    
+    print()
+    
+    # Configure backend
+    print("🖥️  Backend Configuration")
+    print("-" * 25)
+    
+    available_backends = get_available_backends()
+    
+    print("Available backends:")
+    for name, backend_info in available_backends.items():
+        description = backend_info.get("description", "")
+        status = "✓" if backend_info["available"] else "✗"
+        print(f"  {name}: {status} {description}")
+    
+    print()
+    backend_config = config.data.get("backend", {})
+    current_backend = backend_config.get("default", "local")
+    backend = input(f"Default backend [{current_backend}]: ").strip() or current_backend
+    
+    # Update backend config
+    config.data.setdefault("backend", {})
+    config.data["backend"]["default"] = backend
+    
+    print()
+    
+    # Show environment variable requirements
+    print("🔐 Environment Variables")
+    print("-" * 25)
+    
+    required_envs = []
+    if primary in available_providers:
+        provider_info = available_providers[primary]
+        for env_var in provider_info.get("requires_env", []):
+            required_envs.append((primary, env_var))
+    
+    if fallback in available_providers and fallback != primary:
+        provider_info = available_providers[fallback]
+        for env_var in provider_info.get("requires_env", []):
+            required_envs.append((fallback, env_var))
+    
+    if required_envs:
+        print("Required environment variables:")
+        for provider_name, env_var in required_envs:
+            status = "✓ Set" if os.getenv(env_var) else "✗ Not set"
+            print(f"  {env_var} (for {provider_name}): {status}")
+        
+        if any(not os.getenv(env_var) for _, env_var in required_envs):
+            print("\nSome required environment variables are missing.")
+            print("Set them in your shell profile or .env file.")
+    else:
+        print("No API keys required for current configuration.")
+    
+    print()
+    
+    # Validate and save
+    issues = config.validate()
+    if issues:
+        print("⚠️  Configuration issues:")
+        for issue in issues:
+            print(f"  - {issue}")
+        print()
+        
+        if not input("Save configuration anyway? [y/N]: ").strip().lower().startswith('y'):
+            print("Configuration not saved.")
+            return 1
+    
+    # Save configuration
+    config.save(repo_root)
+    print(f"✅ Configuration saved to {config_file}")
+    
+    # Show next steps
+    print()
+    print("🚀 Next Steps")
+    print("-" * 15)
+    print("1. Set any missing environment variables")
+    print("2. Create a spec: sigil generate-spec <name> '<description>'")
+    print("3. Run optimization: sigil run --spec <name> --workspace <workspace>")
+    
+    return 0
+
+
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="sigil", description="Sigil CLI")
     p.add_argument("--repo-root", default=".", help="Repository root (default: .)")
     p.add_argument("--version", action="version", version=f"sigil {__version__}")
     sub = p.add_subparsers(dest="cmd", required=True)
 
-    gspec = sub.add_parser("generate-spec", help="Create a spec scaffold")
-    gspec.add_argument("name")
-    gspec.add_argument("description")
+    gspec = sub.add_parser("generate-spec", help="Create a spec scaffold (optionally using LLM)")
+    gspec.add_argument("name", nargs='?', help="Spec name (optional when using --llm)")
+    gspec.add_argument("description", help="Description or natural language prompt for what to optimize")
+    gspec.add_argument("--llm", action="store_true", help="Use LLM to generate spec and eval from description")
+    gspec.add_argument("--files", help="Comma-separated list of files to analyze (only with --llm)")
     gspec.set_defaults(func=cmd_generate_spec)
 
-    geval = sub.add_parser("generate-eval", help="Create an eval scaffold and link to spec")
-    geval.add_argument("--spec", required=True)
-    geval.add_argument("name")
-    geval.add_argument("description")
+    geval = sub.add_parser("generate-eval", help="Create an eval scaffold (optionally using LLM)")
+    geval.add_argument("--spec", required=True, help="Spec name to link this eval to")
+    geval.add_argument("name", help="Evaluation name")
+    geval.add_argument("description", help="Description or natural language prompt for evaluation")
+    geval.add_argument("--via-description", action="store_true", help="Use LLM to generate eval from description")
     geval.set_defaults(func=cmd_generate_eval)
 
     run = sub.add_parser("run", help="Run optimization")
@@ -185,8 +393,10 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--optimizer", default="alphaevolve")
     run.add_argument("--eval", required=False)
     run.add_argument("--llm", choices=["baseline", "simple-llm"], default="baseline")
-    run.add_argument("--provider", choices=["openai", "stub"], default="stub")
-    run.add_argument("--backend", choices=["local", "ray"], default="local")
+    run.add_argument("--provider", choices=["openai", "anthropic", "stub"], required=False, 
+                     help="LLM provider (defaults to config preference)")
+    run.add_argument("--backend", choices=["local", "ray"], required=False,
+                     help="Execution backend (defaults to config preference)")
     run.add_argument("--num", type=int, default=1, help="Number of candidates to propose")
     run.set_defaults(func=cmd_run)
 
@@ -208,6 +418,9 @@ def build_parser() -> argparse.ArgumentParser:
     addc.add_argument("--run", required=False, help="Run ID (defaults to latest)")
     addc.add_argument("--seed", type=int, required=False)
     addc.set_defaults(func=cmd_add_candidate)
+
+    setup = sub.add_parser("setup", help="Interactive configuration setup")
+    setup.set_defaults(func=cmd_setup)
 
     return p
 

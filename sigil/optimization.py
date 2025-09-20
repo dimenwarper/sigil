@@ -30,15 +30,6 @@ def build_patch_request(spec: Spec) -> PatchRequest:
     )
 
 
-def get_provider(kind: str) -> LLMProvider:
-    if kind == "openai":
-        return OpenAICompatibleProvider()
-    elif kind == "stub":
-        return StubProvider()
-    else:
-        raise ValueError(f"Unknown provider: {kind}")
-
-
 def get_optimizer(kind: str, **kwargs) -> BaseOptimizer:
     """Get an optimizer instance by kind."""
     if kind == "simple":
@@ -170,8 +161,8 @@ class AlphaEvolveOptimizer(BaseOptimizer):
         responses = []
         for individual in best_individuals[:num]:
             responses.append(PatchResponse(
-                patch_text=individual.candidate.patch_text,
-                reasoning=f"Evolved candidate (fitness: {individual.fitness:.4f})" if individual.fitness else "Evolved candidate"
+                patch=individual.candidate.patch_text,
+                rationale=f"Evolved candidate (fitness: {individual.fitness:.4f})" if individual.fitness else "Evolved candidate"
             ))
         
         return responses
@@ -198,7 +189,7 @@ class AlphaEvolveOptimizer(BaseOptimizer):
                 response = provider.propose(req)
                 candidate = Candidate(
                     id=f"gen0_island{i}_ind{j}",
-                    patch_text=response.patch_text
+                    patch_text=response.patch
                 )
                 individual = Individual(
                     candidate=candidate,
@@ -300,7 +291,7 @@ class AlphaEvolveOptimizer(BaseOptimizer):
                     response = provider.propose(req)
                     candidate = Candidate(
                         id=f"gen{generation+1}_island{island.id}_new{i}",
-                        patch_text=response.patch_text
+                        patch_text=response.patch
                     )
                     child = Individual(
                         candidate=candidate,
@@ -359,7 +350,7 @@ class AlphaEvolveOptimizer(BaseOptimizer):
         
         candidate = Candidate(
             id=f"gen{generation}_crossover_{parent1.candidate.id}_{parent2.candidate.id}",
-            patch_text=response.patch_text
+            patch_text=response.patch
         )
         
         return Individual(
@@ -384,7 +375,7 @@ class AlphaEvolveOptimizer(BaseOptimizer):
         
         candidate = Candidate(
             id=f"gen{generation}_mutant_{parent.candidate.id}",
-            patch_text=response.patch_text
+            patch_text=response.patch
         )
         
         return Individual(
