@@ -6,6 +6,13 @@ import os
 from pathlib import Path
 from typing import Any, Dict
 
+from rich.console import Console
+from rich.table import Table
+from rich.prompt import Prompt, Confirm
+from rich.panel import Panel
+from rich.text import Text
+from rich.rule import Rule
+
 from . import __version__
 from .evals import load_eval, scaffold_eval, generate_eval_with_llm
 from .spec import load_spec, scaffold_spec, generate_spec_with_llm
@@ -250,83 +257,162 @@ def cmd_add_candidate(args: argparse.Namespace) -> int:
     return 0
 
 
+def _create_options_table(title: str, options: Dict[str, Dict[str, Any]], current: str) -> Table:
+    """Create a beautiful Rich table for options selection."""
+    table = Table(title=title, show_header=True, header_style="bold blue")
+    table.add_column("#", style="cyan", width=3)
+    table.add_column("Name", style="magenta", min_width=12)
+    table.add_column("Status", width=8)
+    table.add_column("Description", style="dim")
+    table.add_column("Notes", style="yellow")
+    
+    for i, (name, info) in enumerate(options.items(), 1):
+        # Status with colors
+        if info["available"]:
+            status = "[green]✓ Available[/green]"
+        else:
+            status = "[red]✗ Unavailable[/red]"
+        
+        # Current selection indicator
+        name_display = f"[bold]{name}[/bold]" if name == current else name
+        if name == current:
+            name_display += " [dim](current)[/dim]"
+        
+        # Missing requirements
+        notes = ""
+        if not info["available"] and info.get("requires_env"):
+            missing = [env for env in info["requires_env"] if not os.getenv(env)]
+            if missing:
+                notes = f"Missing: {', '.join(missing)}"
+        
+        table.add_row(
+            str(i),
+            name_display,
+            status,
+            info.get("description", ""),
+            notes
+        )
+    
+    return table
+
+
+def _select_from_options(console: Console, prompt: str, options: Dict[str, Dict[str, Any]], current: str) -> str:
+    """Rich-powered interactive selector for options."""
+    console.print()
+    
+    # Create and display the options table
+    table = _create_options_table(prompt, options, current)
+    console.print(table)
+    console.print()
+    
+    # Create choices list for validation
+    choices = [str(i) for i in range(1, len(options) + 1)]
+    option_names = list(options.keys())
+    
+    while True:
+        try:
+            choice = Prompt.ask(
+                f"[bold cyan]Select option[/bold cyan]",
+                choices=choices + [""],
+                default="",
+                show_choices=False,
+                show_default=False
+            )
+            
+            if not choice:
+                console.print(f"[dim]Keeping current selection: [bold]{current}[/bold][/dim]")
+                return current
+            
+            choice_idx = int(choice) - 1
+            selected = option_names[choice_idx]
+            
+            # Warn if selecting unavailable option
+            if not options[selected]["available"]:
+                console.print(f"[yellow]⚠️  Warning: '{selected}' is not currently available.[/yellow]")
+                if not Confirm.ask("[yellow]Continue anyway?[/yellow]", default=False):
+                    continue
+            
+            console.print(f"[green]✓ Selected: [bold]{selected}[/bold][/green]")
+            return selected
+            
+        except (ValueError, IndexError):
+            console.print("[red]Please enter a valid option number or press Enter for current selection[/red]")
+        except KeyboardInterrupt:
+            console.print("\n[yellow]Setup cancelled.[/yellow]")
+            return current
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     """Interactive setup command to configure Sigil."""
     repo_root = Path(args.repo_root).resolve()
+    console = Console()
     
-    print("🔧 Sigil Configuration Setup")
-    print("=" * 40)
+    # Welcome header
+    console.print(Panel.fit(
+        "[bold blue]🔧 Sigil Configuration Setup[/bold blue]\n"
+        "[dim]Configure your LLM providers and execution backends[/dim]",
+        style="blue"
+    ))
     
     # Load existing config or start with defaults
     config_file = repo_root / "sigil.yaml"
     if config_file.exists():
-        print(f"Found existing configuration at {config_file}")
+        console.print(f"[green]✓[/green] Found existing configuration at [bold]{config_file}[/bold]")
         config = Config.load(repo_root)
-        print("Current configuration will be updated.")
+        console.print("[dim]Current configuration will be updated.[/dim]")
     else:
-        print("Creating new configuration...")
+        console.print("[yellow]Creating new configuration...[/yellow]")
         config = Config(DEFAULT_CONFIG_DICT.copy())
     
-    print()
+    console.print()
     
     # Configure LLM providers
-    print("📡 LLM Provider Configuration")
-    print("-" * 30)
+    console.print(Rule("[bold magenta]📡 LLM Provider Configuration[/bold magenta]"))
     
     available_providers = get_available_llm_providers()
-    
-    # Show available providers
-    print("Available LLM providers:")
-    for name, provider_info in available_providers.items():
-        description = provider_info.get("description", "")
-        status = "✓" if provider_info["available"] else "✗"
-        print(f"  {name}: {status} {description}")
-        if not provider_info["available"] and provider_info.get("requires_env"):
-            missing = [env for env in provider_info["requires_env"] if not os.getenv(env)]
-            if missing:
-                print(f"    Missing: {', '.join(missing)}")
-    
-    print()
     llm_config = config.data.get("llm", {})
     current_primary = llm_config.get("primary_provider", "openai")
-    primary = input(f"Primary LLM provider [{current_primary}]: ").strip() or current_primary
+    
+    primary = _select_from_options(
+        console,
+        "Primary LLM Provider",
+        available_providers,
+        current_primary
+    )
     
     current_fallback = llm_config.get("fallback_provider", "stub")
-    fallback = input(f"Fallback LLM provider [{current_fallback}]: ").strip() or current_fallback
+    fallback = _select_from_options(
+        console,
+        "Fallback LLM Provider",
+        available_providers,
+        current_fallback
+    )
     
     # Update LLM config
     config.data.setdefault("llm", {})
     config.data["llm"]["primary_provider"] = primary
     config.data["llm"]["fallback_provider"] = fallback
     
-    print()
-    
     # Configure backend
-    print("🖥️  Backend Configuration")
-    print("-" * 25)
+    console.print(Rule("[bold cyan]🖥️  Backend Configuration[/bold cyan]"))
     
     available_backends = get_available_backends()
-    
-    print("Available backends:")
-    for name, backend_info in available_backends.items():
-        description = backend_info.get("description", "")
-        status = "✓" if backend_info["available"] else "✗"
-        print(f"  {name}: {status} {description}")
-    
-    print()
     backend_config = config.data.get("backend", {})
     current_backend = backend_config.get("default", "local")
-    backend = input(f"Default backend [{current_backend}]: ").strip() or current_backend
+    
+    backend = _select_from_options(
+        console,
+        "Default Backend",
+        available_backends,
+        current_backend
+    )
     
     # Update backend config
     config.data.setdefault("backend", {})
     config.data["backend"]["default"] = backend
     
-    print()
-    
     # Show environment variable requirements
-    print("🔐 Environment Variables")
-    print("-" * 25)
+    console.print(Rule("[bold yellow]🔐 Environment Variables[/bold yellow]"))
     
     required_envs = []
     if primary in available_providers:
@@ -340,42 +426,58 @@ def cmd_setup(args: argparse.Namespace) -> int:
             required_envs.append((fallback, env_var))
     
     if required_envs:
-        print("Required environment variables:")
-        for provider_name, env_var in required_envs:
-            status = "✓ Set" if os.getenv(env_var) else "✗ Not set"
-            print(f"  {env_var} (for {provider_name}): {status}")
+        env_table = Table(title="Required Environment Variables", show_header=True, header_style="bold yellow")
+        env_table.add_column("Variable", style="cyan")
+        env_table.add_column("Provider", style="magenta")
+        env_table.add_column("Status", width=12)
         
-        if any(not os.getenv(env_var) for _, env_var in required_envs):
-            print("\nSome required environment variables are missing.")
-            print("Set them in your shell profile or .env file.")
+        missing_count = 0
+        for provider_name, env_var in required_envs:
+            if os.getenv(env_var):
+                status = "[green]✓ Set[/green]"
+            else:
+                status = "[red]✗ Not set[/red]"
+                missing_count += 1
+            
+            env_table.add_row(env_var, provider_name, status)
+        
+        console.print(env_table)
+        
+        if missing_count > 0:
+            console.print("\n[yellow]⚠️  Some required environment variables are missing.[/yellow]")
+            console.print("[dim]Set them in your shell profile or .env file.[/dim]")
     else:
-        print("No API keys required for current configuration.")
+        console.print("[green]✓ No API keys required for current configuration.[/green]")
     
-    print()
+    console.print()
     
     # Validate and save
     issues = config.validate()
     if issues:
-        print("⚠️  Configuration issues:")
+        console.print("[yellow]⚠️  Configuration Issues Found:[/yellow]")
         for issue in issues:
-            print(f"  - {issue}")
-        print()
+            console.print(f"  [red]•[/red] {issue}")
+        console.print()
         
-        if not input("Save configuration anyway? [y/N]: ").strip().lower().startswith('y'):
-            print("Configuration not saved.")
+        if not Confirm.ask("[yellow]Save configuration anyway?[/yellow]", default=False):
+            console.print("[red]Configuration not saved.[/red]")
             return 1
     
     # Save configuration
     config.save(repo_root)
-    print(f"✅ Configuration saved to {config_file}")
+    console.print(f"[green]✅ Configuration saved to [bold]{config_file}[/bold][/green]")
     
     # Show next steps
-    print()
-    print("🚀 Next Steps")
-    print("-" * 15)
-    print("1. Set any missing environment variables")
-    print("2. Create a spec: sigil generate-spec <name> '<description>'")
-    print("3. Run optimization: sigil run --spec <name> --workspace <workspace>")
+    console.print()
+    next_steps = Panel(
+        "[bold green]🚀 Next Steps[/bold green]\n\n"
+        "[cyan]1.[/cyan] Set any missing environment variables\n"
+        "[cyan]2.[/cyan] Create a spec: [bold]sigil generate-spec <name> '<description>'[/bold]\n"
+        "[cyan]3.[/cyan] Run optimization: [bold]sigil run --spec <name> --workspace <workspace>[/bold]",
+        style="green",
+        title="[bold green]Ready to Go![/bold green]"
+    )
+    console.print(next_steps)
     
     return 0
 
