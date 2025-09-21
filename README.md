@@ -53,7 +53,6 @@ pip install -e .
 - **⚡ Advanced Optimizers**: Simple proposals or AlphaEvolve (island-based evolutionary algorithm)  
 - **🖥️ Flexible Backends**: Local execution or distributed Ray backend
 - **🎨 Rich Interactive CLI**: Live progress display, colored output, and guided setup
-- **🧪 Complete Testing Suite**: Includes symbolic regression example and comprehensive tests
 - **📊 Structured Evaluation**: YAML-based specs and evals with automatic validation
 
 ---
