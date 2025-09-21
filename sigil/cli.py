@@ -12,6 +12,11 @@ from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 from rich.text import Text
 from rich.rule import Rule
+from rich.live import Live
+from rich.progress import Progress, TaskID, SpinnerColumn, TextColumn, BarColumn, TimeElapsedColumn
+from rich.layout import Layout
+from rich.align import Align
+from rich.status import Status
 
 from . import __version__
 from .evals import load_eval, scaffold_eval, generate_eval_with_llm
@@ -35,6 +40,183 @@ from .config import (
     get_available_backends,
     DEFAULT_CONFIG_DICT,
 )
+
+
+class RichRunLogger:
+    """Rich-powered logger for optimization runs with live display."""
+    
+    def __init__(self, console: Console = None, use_live_display: bool = None):
+        self.console = console or Console()
+        
+        # Auto-detect if we should use live display
+        if use_live_display is None:
+            # Don't use live display in non-interactive environments or if stderr is redirected
+            use_live_display = (
+                self.console.is_terminal and 
+                not self.console.is_jupyter and
+                hasattr(self.console.file, 'isatty') and 
+                self.console.file.isatty()
+            )
+        
+        self.use_live_display = use_live_display
+        self.layout = Layout() if use_live_display else None
+        
+        if use_live_display:
+            self.progress = Progress(
+                SpinnerColumn(),
+                TextColumn("[progress.description]{task.description}"),
+                BarColumn(),
+                TextColumn("[progress.percentage]{task.percentage:>3.0f}%"),
+                TimeElapsedColumn(),
+                console=self.console,
+                transient=False
+            )
+        else:
+            # Simple progress tracking for non-interactive mode
+            self.progress = None
+            
+        self.logs = []
+        self.current_status = "Initializing..."
+        self.live = None
+        self.tasks = {}  # Track tasks for non-live mode
+        
+    def setup_layout(self, spec_name: str, workspace: str, num_candidates: int):
+        """Setup the live display layout."""
+        # Header
+        header = Panel(
+            f"[bold blue]🚀 Sigil Optimization Run[/bold blue]\n"
+            f"[dim]Spec: {spec_name} | Workspace: {workspace} | Candidates: {num_candidates}[/dim]",
+            style="blue"
+        )
+        
+        # Progress section
+        progress_panel = Panel(
+            self.progress,
+            title="[bold green]Progress[/bold green]",
+            border_style="green"
+        )
+        
+        # Logs section
+        log_content = "\n".join(self.logs[-10:]) if self.logs else "[dim]Waiting for logs...[/dim]"
+        logs_panel = Panel(
+            log_content,
+            title="[bold yellow]Recent Logs[/bold yellow]",
+            border_style="yellow",
+            height=10
+        )
+        
+        # Status section
+        status_panel = Panel(
+            f"[bold cyan]Status:[/bold cyan] {self.current_status}",
+            border_style="cyan"
+        )
+        
+        # Layout structure
+        self.layout.split_column(
+            Layout(header, size=4),
+            Layout(progress_panel, size=8),
+            Layout(logs_panel, name="logs"),
+            Layout(status_panel, size=3)
+        )
+        
+    def start_live_display(self, spec_name: str, workspace: str, num_candidates: int):
+        """Start the live display."""
+        if self.use_live_display:
+            self.setup_layout(spec_name, workspace, num_candidates)
+            self.live = Live(self.layout, console=self.console, refresh_per_second=4)
+            self.live.start()
+        else:
+            # Simple header for non-live mode
+            self.console.print(Panel.fit(
+                f"[bold blue]🚀 Sigil Optimization Run[/bold blue]\n"
+                f"[dim]Spec: {spec_name} | Workspace: {workspace} | Candidates: {num_candidates}[/dim]",
+                style="blue"
+            ))
+        
+    def stop_live_display(self):
+        """Stop the live display."""
+        if self.live:
+            self.live.stop()
+            
+    def add_task(self, description: str, total: int = 100) -> TaskID:
+        """Add a progress task."""
+        if self.use_live_display and self.progress:
+            return self.progress.add_task(description, total=total)
+        else:
+            # Simple task tracking for non-live mode
+            task_id = len(self.tasks)
+            self.tasks[task_id] = {"description": description, "total": total, "completed": 0}
+            self.console.print(f"[blue]Started:[/blue] {description}")
+            return task_id
+        
+    def update_task(self, task_id: TaskID, advance: int = 1, description: str = None):
+        """Update a progress task."""
+        if self.use_live_display and self.progress:
+            self.progress.update(task_id, advance=advance, description=description)
+        else:
+            # Simple progress for non-live mode
+            if task_id in self.tasks:
+                self.tasks[task_id]["completed"] += advance
+                if description:
+                    self.tasks[task_id]["description"] = description
+                
+                task = self.tasks[task_id]
+                if task["completed"] >= task["total"]:
+                    self.console.print(f"[green]✅ Completed:[/green] {task['description']}")
+        
+    def log(self, message: str, style: str = ""):
+        """Add a log message."""
+        styled_message = f"[{style}]{message}[/{style}]" if style else message
+        self.logs.append(styled_message)
+        
+        if self.use_live_display and self.live:
+            # Update the logs panel if live display is running
+            log_content = "\n".join(self.logs[-10:])
+            self.layout["logs"].update(
+                Panel(
+                    log_content,
+                    title="[bold yellow]Recent Logs[/bold yellow]",
+                    border_style="yellow",
+                    height=10
+                )
+            )
+        else:
+            # Just print the message directly in non-live mode
+            self.console.print(styled_message)
+            
+    def set_status(self, status: str):
+        """Update the current status."""
+        self.current_status = status
+        if self.use_live_display and self.live:
+            status_panel = Panel(
+                f"[bold cyan]Status:[/bold cyan] {status}",
+                border_style="cyan"
+            )
+            self.layout.split_column(
+                self.layout.splitters[0],  # header
+                self.layout.splitters[1],  # progress  
+                self.layout["logs"],       # logs
+                Layout(status_panel, size=3)  # status
+            )
+        else:
+            # Just print status in non-live mode
+            self.console.print(f"[dim]Status: {status}[/dim]")
+            
+    def success(self, message: str):
+        """Log a success message."""
+        self.log(f"✅ {message}", "green")
+        
+    def warning(self, message: str):
+        """Log a warning message."""
+        self.log(f"⚠️ {message}", "yellow")
+        
+    def error(self, message: str):
+        """Log an error message."""
+        self.log(f"❌ {message}", "red")
+        
+    def info(self, message: str):
+        """Log an info message."""
+        self.log(f"ℹ️ {message}", "blue")
 
 
 def cmd_generate_spec(args: argparse.Namespace) -> int:
@@ -103,65 +285,202 @@ def _run(
     provider_kind: str,
     backend_kind: str,
     num: int,
+    console: Console = None,
 ) -> int:
-    rd = run_dir(repo_root, spec_name, workspace, run_id(optimizer))
-    eval_def = load_eval(repo_root, eval_name)
-
-    # Load config for provider/backend creation
-    config = Config.load(repo_root)
+    if console is None:
+        console = Console()
     
-    spec = load_spec(repo_root, spec_name)
+    # Create Rich logger
+    logger = RichRunLogger(console)
+    logger.start_live_display(spec_name, workspace, num)
     
-    provider = config.get_llm_provider(provider_kind)
-    backend = config.get_backend(backend_kind)
-    
-    optimizer = SimpleOptimizer()
-    responses = optimizer.propose(spec, provider, num=max(1, num))
-    patches: list[str] = [r.patch for r in responses]
+    try:
+        logger.set_status("Initializing run directory...")
+        rd = run_dir(repo_root, spec_name, workspace, run_id(optimizer))
+        logger.info(f"Created run directory: {rd}")
+        
+        logger.set_status("Loading evaluation definition...")
+        eval_def = load_eval(repo_root, eval_name)
+        logger.success(f"Loaded evaluation: {eval_name}")
 
-    # Validate and store candidates
-    candidates = set()
-    nodes: list[Dict[str, Any]] = []
-    for patch_text in patches:
-        ok, msg = validate_patch_against_pins(patch_text, spec, parent_root=repo_root)
-        if not ok:
-            raise SystemExit(f"Proposed patch invalid: {msg}")
-        digest, cdir = store_candidate(rd, patch_text)
-        candidates.add(Candidate(digest, patch_text))
-    candidates = list(candidates)
+        # Load config for provider/backend creation
+        logger.set_status("Setting up providers and backend...")
+        config = Config.load(repo_root)
+        spec = load_spec(repo_root, spec_name)
+        
+        provider = config.get_llm_provider(provider_kind)
+        backend = config.get_backend(backend_kind)
+        logger.info(f"Using provider: {provider_kind}, backend: {backend_kind}")
+        
+        # Generate candidates
+        logger.set_status("Generating candidate patches...")
+        proposal_task = logger.add_task("Generating proposals", total=100)
+        
+        optimizer_instance = SimpleOptimizer()
+        logger.info(f"Using optimizer: {optimizer_instance.__class__.__name__}")
+        
+        responses = optimizer_instance.propose(spec, provider, num=max(1, num))
+        patches: list[str] = [r.patch for r in responses]
+        logger.update_task(proposal_task, advance=100)
+        logger.success(f"Generated {len(patches)} candidate patches")
 
-    # Evaluate in selected backend
-    results: list[EvalResult] = backend.evaluate(eval_def, repo_root, candidates)
-    # Write candidate results and build index
-    for res, candidate in zip(results, candidates):
-        cdir = rd / "candidates" / res.id[:2] / res.id[2:4] / res.id
-        write_json(cdir / "metrics.json", {"metrics": res.metrics, "logs": res.logs, "error": res.error})
-        (cdir / "logs.txt").write_text("candidate evaluated")
-        nodes.append({
-            "id": res.id, 
-            "status": "evaluated" if not res.error else "error", 
-            "metrics": res.metrics,
-            "candidate": candidate.id,
-            }
+        # Validate and store candidates
+        logger.set_status("Validating and storing candidates...")
+        validation_task = logger.add_task("Validating patches", total=len(patches))
+        
+        candidates = set()
+        nodes: list[Dict[str, Any]] = []
+        
+        for i, patch_text in enumerate(patches):
+            logger.set_status(f"Validating candidate {i+1}/{len(patches)}...")
+            ok, msg = validate_patch_against_pins(patch_text, spec, parent_root=repo_root)
+            if not ok:
+                logger.error(f"Patch validation failed: {msg}")
+                logger.stop_live_display()
+                raise SystemExit(f"Proposed patch invalid: {msg}")
+            
+            digest, cdir = store_candidate(rd, patch_text)
+            candidates.add(Candidate(digest, patch_text))
+            logger.update_task(validation_task, advance=1)
+            logger.info(f"Stored candidate {digest[:8]}...")
+            
+        candidates = list(candidates)
+        logger.success(f"All {len(candidates)} candidates validated and stored")
+
+        # Evaluate in selected backend
+        logger.set_status("Running evaluations...")
+        eval_task = logger.add_task("Evaluating candidates", total=len(candidates))
+        
+        logger.info(f"Starting evaluation with {backend_kind} backend...")
+        results: list[EvalResult] = backend.evaluate(eval_def, repo_root, candidates)
+        
+        # Write candidate results and build index
+        logger.set_status("Processing results...")
+        results_task = logger.add_task("Processing results", total=len(results))
+        
+        successful_evals = 0
+        failed_evals = 0
+        
+        for res, candidate in zip(results, candidates):
+            cdir = rd / "candidates" / res.id[:2] / res.id[2:4] / res.id
+            write_json(cdir / "metrics.json", {"metrics": res.metrics, "logs": res.logs, "error": res.error})
+            (cdir / "logs.txt").write_text("candidate evaluated")
+            
+            status = "evaluated" if not res.error else "error"
+            if res.error:
+                failed_evals += 1
+                logger.warning(f"Candidate {res.id[:8]} failed: {res.error}")
+            else:
+                successful_evals += 1
+                logger.info(f"Candidate {res.id[:8]} evaluated successfully")
+            
+            nodes.append({
+                "id": res.id, 
+                "status": status, 
+                "metrics": res.metrics,
+                "candidate": candidate.id,
+            })
+            logger.update_task(results_task, advance=1)
+            
+        # Save run metadata
+        write_json(rd / "index.json", {"nodes": nodes})
+        write_json(rd / "run.json", {
+            "optimizer": optimizer_instance.__class__.__name__, 
+            "backend": backend_kind, 
+            "spec": spec_name, 
+            "workspace": workspace, 
+            "eval": eval_name
+        })
+        
+        logger.set_status("Run completed!")
+        logger.success(f"Optimization run completed successfully!")
+        logger.info(f"Results saved to: {rd}")
+        logger.success(f"Successful evaluations: {successful_evals}")
+        if failed_evals > 0:
+            logger.warning(f"Failed evaluations: {failed_evals}")
+        
+        # Show results summary
+        if successful_evals > 0:
+            logger.info("Top candidates by metrics:")
+            # Filter results to only include those with valid (non-None) first metric values
+            def has_valid_metrics(result):
+                if not result.metrics:
+                    return False
+                first_value = list(result.metrics.values())[0]
+                return first_value is not None
+            
+            # Only include results with valid metrics for sorting
+            valid_results = [r for r in results if not r.error and r.metrics and has_valid_metrics(r)]
+            
+            if valid_results:
+                sorted_results = sorted(valid_results, 
+                                      key=lambda x: list(x.metrics.values())[0], 
+                                      reverse=True)
+                for i, res in enumerate(sorted_results[:3]):
+                    metrics_str = ", ".join([f"{k}={v}" for k, v in res.metrics.items()])
+                    logger.info(f"  {i+1}. {res.id[:8]}: {metrics_str}")
+            else:
+                logger.info("  No candidates with valid metrics to display")
+        
+        logger.stop_live_display()
+        
+        # Final summary
+        console.print()
+        summary_panel = Panel(
+            f"[bold green]🎉 Optimization Run Complete![/bold green]\n\n"
+            f"[cyan]Run ID:[/cyan] {rd.name}\n"
+            f"[cyan]Candidates:[/cyan] {len(candidates)}\n"
+            f"[cyan]Successful:[/cyan] {successful_evals}\n"
+            f"[cyan]Failed:[/cyan] {failed_evals}\n"
+            f"[cyan]Results:[/cyan] {rd}",
+            style="green",
+            title="[bold green]Run Summary[/bold green]"
         )
-    write_json(rd / "index.json", {"nodes": nodes})
-    write_json(rd / "run.json", {"optimizer": optimizer.__class__.__name__, "backend": backend_kind, "spec": spec_name, "workspace": workspace, "eval": eval_name})
-    print(f"Simple LLM run completed at {rd}; candidates: {[it.id for it in candidates]}")
-    return 0
+        console.print(summary_panel)
+        
+        # Compatibility message for tests
+        console.print(f"Simple LLM run completed at {rd}; candidates: {[c.id for c in candidates]}")
+        
+        return 0
+        
+    except Exception as e:
+        logger.error(f"Run failed: {str(e)}")
+        logger.stop_live_display()
+        console.print(f"[red]❌ Run failed: {e}[/red]")
+        return 1
 
 
 def cmd_run(args: argparse.Namespace) -> int:
     repo_root = Path(args.repo_root).resolve()
+    console = Console()
+    
+    # Welcome header
+    console.print(Panel.fit(
+        "[bold blue]🚀 Starting Sigil Optimization Run[/bold blue]\n"
+        f"[dim]Spec: {args.spec} | Workspace: {args.workspace}[/dim]",
+        style="blue"
+    ))
     
     # Load configuration
+    console.print("[dim]Loading configuration...[/dim]")
     config = Config.load(repo_root)
     
     # Use config defaults if not specified via command line
     provider_kind = args.provider if hasattr(args, 'provider') and args.provider else config.get_preferred_llm_provider()
     backend_kind = args.backend if hasattr(args, 'backend') and args.backend else config.get_preferred_backend()
     
+    # Display configuration
+    config_table = Table(title="Run Configuration", show_header=True, header_style="bold blue")
+    config_table.add_column("Setting", style="cyan")
+    config_table.add_column("Value", style="magenta")
+    config_table.add_row("LLM Provider", provider_kind)
+    config_table.add_row("Backend", backend_kind)
+    config_table.add_row("Optimizer", args.optimizer)
+    config_table.add_row("Candidates", str(args.num))
+    console.print(config_table)
+    console.print()
+    
     # Only validate configuration if we're relying on config defaults
-    # If providers/backends are explicitly specified, we can skip validation
     using_config_provider = not (hasattr(args, 'provider') and args.provider)
     using_config_backend = not (hasattr(args, 'backend') and args.backend)
     
@@ -178,17 +497,27 @@ def cmd_run(args: argparse.Namespace) -> int:
                 relevant_issues.append(issue)
         
         if relevant_issues:
-            print("Configuration issues found:")
+            console.print("[red]⚠️  Configuration Issues Found:[/red]")
             for issue in relevant_issues:
-                print(f"  - {issue}")
-            print("Run 'sigil setup' to fix configuration issues.")
+                console.print(f"  [red]•[/red] {issue}")
+            console.print("\n[yellow]Run 'sigil setup' to fix configuration issues.[/yellow]")
             return 1
     
     # Load spec for validation
-    spec = load_spec(repo_root, args.spec)
-    if not spec.evals:
-        raise SystemExit("Spec has no evals linked. Use generate-eval or add one.")
-    eval_name = args.eval or spec.evals[0]
+    console.print("[dim]Loading spec and evaluation...[/dim]")
+    try:
+        spec = load_spec(repo_root, args.spec)
+        if not spec.evals:
+            console.print("[red]❌ Spec has no evals linked. Use generate-eval or add one.[/red]")
+            return 1
+        eval_name = args.eval or spec.evals[0]
+        
+        console.print(f"[green]✅ Loaded spec '[bold]{spec.name}[/bold]' with eval '[bold]{eval_name}[/bold]'[/green]")
+        console.print()
+        
+    except Exception as e:
+        console.print(f"[red]❌ Error loading spec: {e}[/red]")
+        return 1
     
     return _run(
         repo_root, 
@@ -198,7 +527,8 @@ def cmd_run(args: argparse.Namespace) -> int:
         eval_name=eval_name,
         provider_kind=provider_kind,
         backend_kind=backend_kind,
-        num=args.num
+        num=args.num,
+        console=console
         )
 
 
