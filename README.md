@@ -7,7 +7,7 @@
 </p>
 
 
-# Sigil: an open specification for LLM‑guided code optimization (v0.1)
+# Sigil: framework for LLM‑guided code optimization (v0.1)
 
 Sigil is a minimal, language‑agnostic framework that turns codebases into searchable design spaces and LLMs into proposal policies. It separates *what* should be optimized (specs), *how* candidates are judged (evals), and *how* search proceeds (optimizers), while recording a tamper‑evident provenance of every change as a tree of unified diffs in a workspace. The defaults are brutally simple; everything advanced is a plugin.
 This repo includes a complete implementation with multiple LLM providers, backends for running evals, optimization algorithms, interactive setup, and a CLI interface.
