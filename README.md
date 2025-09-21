@@ -57,13 +57,7 @@ pip install -e .
 
 ---
 
-## 1. Scope and guarantees
-
-A spec declares optimization targets but is silent about algorithms. An eval declares measurements but is silent about edits. An optimizer implements propose‑build‑evaluate‑select at scale but is silent about domain semantics. A workspace is the authoritative record: every candidate is a content‑addressed patch plus its metrics and build logs. Sigil guarantees that any published result can be *replayed* from the recorded patch, environment, seed, and eval definition to reproduce metrics within stated tolerances.
-
----
-
-## 2. Core objects and their contracts
+## 1. Core objects and their contracts
 
 **Spec.** A small declarative file naming the code elements eligible for modification and how to locate them. It carries no optimization hints. Targets to be optimized are located via *pins* that are language‑agnostic and ideally defined as comments in the source code. A pin has an identity (stable across revisions), a locator, and immutable interface constraints that proposed edits must respect.
 
@@ -81,11 +75,13 @@ A spec declares optimization targets but is silent about algorithms. An eval dec
 
 **Registry.** An optional publish target that accepts signed result bundles (patch + eval manifest + metrics + attestations) and exposes usage/telemetry for collaborative discovery and credit.
 
+A spec declares optimization targets but is silent about algorithms. An eval declares measurements but is silent about edits. An optimizer implements propose‑build‑evaluate‑select at scale but is silent about domain semantics. A workspace is the authoritative record: every candidate is a content‑addressed patch plus its metrics and build logs. Sigil guarantees that any published result can be *replayed* from the recorded patch, environment, seed, and eval definition to reproduce metrics within stated tolerances.
+
 ---
 
-## 3. File formats (dead‑simple, language‑agnostic)
+## 2. Concept implementations
 
-### 3.1 Spec (YAML)
+### 2.1 Spec (YAML)
 
 The spec answers only “what is mutable and how to find it.” Pins can be: file globs; symbol names; regex delimeters; or tree‑sitter queries if available. Interface constraints pin signatures so proposal edits cannot break call sites.
 
@@ -106,9 +102,9 @@ pins:
 base_commit: [commit_id]
 ```
 
-### 3.2 Eval (YAML)
+### 2.2 Eval (YAML)
 
-The eval defines how to build, run, and measure candidates. It may compose several metrics and specify an aggregator.
+The eval defines how to build, run, and measure candidates. It is composed of a generator that optionally generates inputs for the val and a set of metrics which themselves are comprised of a command to run and a small parsing specification to parse the result. An eval may compose several metrics and specify an aggregator. At the end it has an accept rule, a policy that candidates need to pass to be promoted, and budgets that candidates need adhere to. An optional replay field contains values needed for reproducibility.
 
 ```yaml
 # walltime.eval.yaml
@@ -137,7 +133,7 @@ replay:
   seed: 17
 ```
 
-### 3.3 Workspace layout
+### 2.3 Directory layout and workspaces
 
 The home directory where all of these yamls should live is a `.sigil` directory within a repository. All other directories live there. All state for a spec `myspec` and workspace `myworkspace` lives under `.sigil/myspec/workspaces/myworkspace/`.
 
@@ -165,31 +161,9 @@ myspec/
         my_kernel@v3 -> ./runs/<run_id>/candidates/7fb1…
 ```
 
-### 3.4 Global config
-
-```yaml
-# sigil.yaml
-version: 0.1
-backend_profiles:
-  mybackend:
-    kind: k8s
-    namespace: sigil
-    cpu: 4
-    mem_gb: 16
-    gpu: 1
-optimizer_params:
-  alphaevolve:
-    models:
-      default_llm:
-        provider: openai-compatible
-        model: gpt-4.1-mini
-        rate_limit_qps: 2
-registry: https://registry.sigil
-```
-
 ---
 
-## 4. CLI contract
+## 3. CLI
 
 Sigil’s CLI is declarative and composable. Generation helpers produce skeletons but are optional.
 
@@ -199,12 +173,14 @@ Sigil’s CLI is declarative and composable. Generation helpers produce skeleton
 # Interactive configuration setup
 $ sigil setup
 
-# Generate specifications (with optional LLM assistance)
-$ sigil generate-spec myspec "improve the kernel in my_kernel to do matmuls"
-$ sigil generate-spec --llm "optimize sorting algorithms" --files "utils.py,algorithms.py"
+# This generates an empty spec scaffold that is manually filled in 
+$ sigil generate-spec myspec
+# This uses an LLM to generate a spec via a description
+$ sigil generate-spec --via-description "optimize sorting algorithms" --files "utils.py,algorithms.py"
 
-# Generate evaluations (with optional LLM assistance)
+# This generates an empty eval for a specific spec
 $ sigil generate-eval --spec myspec performance "measure wall time of my_kernel"
+# This uses an LLM to generate an eval via a description
 $ sigil generate-eval --spec myspec --via-description correctness "verify output matches expected"
 
 # Run optimization with flexible options
@@ -215,6 +191,10 @@ $ sigil run --spec myspec --workspace myworkspace --provider openai --backend ra
 $ sigil inspect --spec myspec --workspace myworkspace
 $ sigil validate-patch --spec myspec --patch-file changes.diff
 $ sigil add-candidate --spec myspec --workspace myworkspace --patch-file optimized.diff
+
+
+# TODO:
+$ sigil publish
 ```
 
 ### Provider and Backend Options
@@ -238,7 +218,7 @@ $ sigil add-candidate --spec myspec --workspace myworkspace --patch-file optimiz
 
 ---
 
-## 5. Example: Symbolic Regression
+## 4. Example: Symbolic Regression
 
 Sigil includes a complete working example that demonstrates optimization from `f(x) = x` to `f(x) = x**2` using symbolic regression. This example showcases the full workflow:
 
@@ -277,27 +257,14 @@ This example demonstrates Sigil's ability to perform semantic code transformatio
 
 ---
 
-## 6. Collaboration model
+## 5. Future work and vision
 
-A published candidate is a portable artifact that others can fetch, replay, and extend as a new run parent. Credit is attached at the patch level; downstream improvements keep lineage so cumulative contributions are visible. Opening a project for contributions is a single command: publish the spec and evals; contributors run `sigil run --spec yourspec …` and push their results. The registry exposes download counts, replay confirmations, and deployment telemetry (latency deltas and error rates) when consumers opt‑in to share usage statistics.
+### 5.1 Collaboration model
 
----
+A medium term vision of the project is to enable collaborative codeopt runs. I'm still deciding how this is going to work but it might go something like this:
 
-## 7. Implementation Status & Testing
+A published codeopt candidate is a portable artifact that others can fetch, replay, and extend as a new run parent. Credit is attached at the patch level; downstream improvements keep lineage so cumulative contributions are visible. Opening a project for contributions is a single command: publish the spec and evals; contributors run `sigil run --spec yourspec …` and push their results. The registry exposes download counts, replay confirmations, and deployment telemetry (latency deltas and error rates) when consumers opt‑in to share usage statistics.
 
-Sigil includes an implementation of the above specification with:
+### 5.1 MCP
 
-- **✅ Core Framework**: Specs, evals, workspaces, and patch management
-- **✅ LLM Integration**: OpenAI, Anthropic, and stub providers with fallback support  
-- **✅ Optimization Algorithms**: Simple proposals and AlphaEvolve evolutionary optimizer
-- **✅ Execution Backends**: Local threading and distributed Ray backend
-- **✅ Rich CLI Interface**: Interactive setup, live progress display, colored output
-- **✅ Comprehensive Testing**: 489 lines of tests covering optimization algorithms
-- **✅ Working Example**: Symbolic regression demonstration with full workflow
-- **✅ Configuration Management**: YAML-based config with validation and environment detection
-
----
-
-## 8. Opinionated defaults
-
-YAML everywhere for human inspection. Unified diffs as the only edit format, with AST validation to ensure syntactic integrity. Tree‑sitter for pins when available; file and symbol-based targeting as the primary mechanism. Population‑based search first; annealing and RL later. Hermetic containers for every eval. Redacted but preserved LLM prompts for audit. No optimizer has permission to mutate outside declared pins. Correctness is non‑negotiable; performance wins are otherwise meaningless.
+Sigil would likely benefit from being a tool within some MCP server. Instead of learning sigil commands, one could ask an agent to fetch a repository, describe the specs available, and doe some codeopt runs that are then published.
