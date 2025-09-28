@@ -672,6 +672,22 @@ def _select_from_options(console: Console, prompt: str, options: Dict[str, Dict[
             return current
 
 
+def cmd_ui(args: argparse.Namespace) -> int:
+    """Launch the Textual UI for managing Sigil specs and workspaces."""
+    repo_root = Path(args.repo_root).resolve()
+    
+    try:
+        from .ui import run_tui
+        run_tui(repo_root)
+        return 0
+    except ImportError:
+        print("Error: Textual UI dependencies not installed. Run: pip install textual")
+        return 1
+    except Exception as e:
+        print(f"Error launching UI: {e}")
+        return 1
+
+
 def cmd_setup(args: argparse.Namespace) -> int:
     """Interactive setup command to configure Sigil."""
     repo_root = Path(args.repo_root).resolve()
@@ -868,6 +884,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     setup = sub.add_parser("setup", help="Interactive configuration setup")
     setup.set_defaults(func=cmd_setup)
+
+    ui = sub.add_parser("ui", help="Launch the interactive TUI for managing specs and workspaces")
+    ui.set_defaults(func=cmd_ui)
 
     return p
 

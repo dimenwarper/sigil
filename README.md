@@ -174,6 +174,9 @@ Sigil’s CLI is declarative and composable. Generation helpers produce skeleton
 # Interactive configuration setup
 $ sigil setup
 
+# Launch the interactive TUI for comprehensive management
+$ sigil ui
+
 # This generates an empty spec scaffold that is manually filled in 
 $ sigil generate-spec myspec
 # This uses an LLM to generate a spec via a description
@@ -197,6 +200,30 @@ $ sigil add-candidate --spec myspec --workspace myworkspace --patch-file optimiz
 # TODO:
 $ sigil publish
 ```
+
+### Interactive TUI
+
+Sigil includes a comprehensive Text User Interface (TUI) built with [Textual](https://textual.textualize.io/) that provides a visual way to explore and manage your optimization projects:
+
+```bash
+$ sigil ui
+```
+
+**Features:**
+- 📋 **Specs Explorer**: Browse all specs with their pins, evaluations, and metadata
+- 🧪 **Evaluations Viewer**: Examine evaluation definitions, metrics, and acceptance criteria  
+- 🗂️ **Workspace Management**: Navigate through workspaces and their optimization runs
+- 🏃 **Run History**: View detailed run information, candidates, and results
+- 📊 **Candidate Analysis**: Inspect optimization candidates with their metrics and status
+- 🎯 **Interactive Navigation**: Tree-based navigation with keyboard shortcuts
+
+**Navigation:**
+- Use arrow keys to navigate the tree structure
+- Press `Enter` to select items and switch between tabs
+- Press `r` to refresh data from the filesystem
+- Press `q` to quit the application
+
+The TUI automatically discovers all specs, evaluations, workspaces, and runs in your repository's `.sigil` directory, providing a comprehensive overview of your optimization projects.
 
 ### Provider and Backend Options
 
