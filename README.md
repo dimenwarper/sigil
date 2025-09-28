@@ -27,6 +27,7 @@ cd sigil
 pip install -e .
 ```
 
+
 ### Quick Start
 
 1. **Interactive Setup** - Configure your LLM providers and backends:
@@ -47,13 +48,13 @@ pip install -e .
    sigil run --spec myopt --workspace experiment1
    ```
 
-### Key Features
+### Running tests
 
-- **🤖 Multiple LLM Providers**: OpenAI, Anthropic, or stub providers for testing
-- **⚡ Advanced Optimizers**: Simple proposals or AlphaEvolve (island-based evolutionary algorithm)  
-- **🖥️ Flexible Backends**: Local execution or distributed Ray backend
-- **🎨 Rich Interactive CLI**: Live progress display, colored output, and guided setup
-- **📊 Structured Evaluation**: YAML-based specs and evals with automatic validation
+To run local tests for this repo, you can use the Makefile:
+
+```
+make test
+```
 
 ---
 
