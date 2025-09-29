@@ -274,6 +274,17 @@ sigil run --spec symbolic_regression --workspace demo --num 3
 sigil inspect --spec symbolic_regression --workspace demo
 ```
 
+### Additional Examples
+Self-contained example repos live under `examples/`, each shipping a `.sigil/` spec, evals, and helper scripts:
+
+- `examples/adder_opt` – numeric kernel in Python with latency and correctness evals
+- `examples/markdown_formatter` – Markdown formatting cleanup validated against golden files
+- `examples/json_validator` – JSON validation helper tracking throughput and accuracy
+- `examples/matrix_mul_cpp` – C++ matrix multiplication benchmark for systems-oriented tuning
+- `examples/frontend_counter` – React + TypeScript reducer exercised via `ts-node`
+
+Each directory includes a README with manual commands and sample `sigil run` invocations to kickstart experimentation.
+
 ### What Happens
 1. **Target Function**: Starts with `return x` (linear)
 2. **LLM Optimization**: Proposes patches to transform the function

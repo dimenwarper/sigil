@@ -1,0 +1,6 @@
+{
+  "id": 123,
+  "name": "example",
+  "active": true,
+  "roles": ["viewer", "editor"]
+}

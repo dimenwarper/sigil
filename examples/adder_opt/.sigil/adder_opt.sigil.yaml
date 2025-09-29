@@ -1,0 +1,16 @@
+version: '0.1'
+name: adder_opt
+description: Optimize the add_all routine for performance without breaking correctness
+repo_root: .
+evals:
+- adder_performance
+pins:
+- id: add_all_loop
+  language: python
+  files:
+  - adder_opt/addition.py
+  symbol: add_all
+  ast_query: null
+  uuid: 0b4e9bfd-4dc3-4a1c-8efe-64fdf75f1a4d
+base_commit: null
+id: 9f192f8b-6a9c-4fa1-b1b5-52b04b184dfb

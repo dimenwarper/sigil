@@ -1,0 +1,16 @@
+version: '0.1'
+name: markdown_formatter
+description: Improve markdown formatting without changing expected output
+repo_root: .
+evals:
+- markdown_eval
+pins:
+- id: markdown_format
+  language: python
+  files:
+  - md_formatter/formatting.py
+  symbol: format_markdown
+  ast_query: null
+  uuid: 2300cb7f-c986-4f81-b57e-0d4a9195ceaf
+base_commit: null
+id: 5a9358fd-f97c-44f3-86aa-67f3a87ea585

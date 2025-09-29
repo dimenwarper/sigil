@@ -1,0 +1,25 @@
+version: '0.1'
+name: counter_eval
+description: Run reducer correctness checks and measure latency via ts-node
+inputs:
+  generator: null
+metrics:
+- id: correctness
+  kind: checker
+  command: ./scripts/run_eval.sh correctness
+  parse: exit_code==0
+- id: latency_ms
+  kind: numeric
+  command: ./scripts/run_eval.sh latency
+  parse: "latency_ms=([0-9.]+)"
+aggregate:
+  objective: min(latency_ms) subject_to correctness==true
+  tie_breakers:
+  - mean(latency_ms)
+accept:
+  rule: correctness==true
+budgets:
+  candidate_timeout_s: 180
+  total_wall_clock_h: 1
+replay:
+  seed: 29

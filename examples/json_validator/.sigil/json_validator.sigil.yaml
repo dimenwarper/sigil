@@ -1,0 +1,16 @@
+version: '0.1'
+name: json_validator
+description: Optimize JSON validator without breaking required checks
+repo_root: .
+evals:
+- json_validation
+pins:
+- id: validate_payload
+  language: python
+  files:
+  - validator/rules.py
+  symbol: validate_payload
+  ast_query: null
+  uuid: f2cb45de-4ed9-4c69-9d79-e468ce0cbcb0
+base_commit: null
+id: 16d8001b-b969-4d09-a7b7-204fff78ec82

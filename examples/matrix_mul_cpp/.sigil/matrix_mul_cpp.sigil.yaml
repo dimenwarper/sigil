@@ -1,0 +1,16 @@
+version: '0.1'
+name: matrix_mul_cpp
+description: Optimize the C++ matrix multiplication kernel
+repo_root: .
+evals:
+- matrix_benchmark
+pins:
+- id: multiply_kernel
+  language: cpp
+  files:
+  - src/matrix.cpp
+  symbol: multiply
+  ast_query: null
+  uuid: 8d9b8a8f-6fd6-43f7-a47b-0d0c15fe957b
+base_commit: null
+id: 41a09821-41d0-4f27-80dd-0eb4d3c102d0

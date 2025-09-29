@@ -1,0 +1,16 @@
+version: '0.1'
+name: frontend_counter
+description: Optimize the counter reducer for responsiveness without altering behaviour
+repo_root: .
+evals:
+- counter_eval
+pins:
+- id: update_counter_reducer
+  language: typescript
+  files:
+  - src/state.ts
+  symbol: updateCounter
+  ast_query: null
+  uuid: 3f7d7d7e-8c22-47c3-9a9d-03cda29d8f75
+base_commit: null
+id: c2f2fb30-4ff1-4bf2-9bca-49d2ac4f91f7
